@@ -15,6 +15,7 @@ export const App: React.FC = () => {
   const [myToken] = useState(() => generatePairingToken());
   const [isPairingOpen, setIsPairingOpen] = useState(false);
   const [networkStatus, setNetworkStatus] = useState({ connected: false, url: 'ws://127.0.0.1:4848' });
+  const [isPeerTyping, setIsPeerTyping] = useState(false);
 
   // Initial contacts with default local network peer placeholder
   const [contacts, setContacts] = useState<Contact[]>([
@@ -64,7 +65,7 @@ export const App: React.FC = () => {
       content: 'Welcome to LYNQ Communication! Ultra-fast local LAN messaging is ready.',
       timestamp: Date.now() - 60000,
       status: 'read',
-      reactions: {},
+      reactions: { '👍': ['peer_node_1'] },
       isEdited: false,
       isDeleted: false,
       isPinned: false,
@@ -82,11 +83,52 @@ export const App: React.FC = () => {
       if (event.type === 'status') {
         setNetworkStatus(event.payload);
       } else if (event.type === 'message') {
-        setMessages((prev) => [...prev, event.payload]);
+        const newMsg = event.payload;
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === newMsg.id)) return prev;
+          return [...prev, newMsg];
+        });
+
+        // Automatically acknowledge and mark as read if conversation is open
+        if (selectedContact && newMsg.senderId === selectedContact.uid) {
+          lynqClient.sendReadReceipt(newMsg.senderId, newMsg.id);
+        }
       } else if (event.type === 'ack') {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === event.payload.messageId ? { ...m, status: event.payload.status as any } : m
+          )
+        );
+      } else if (event.type === 'typing') {
+        if (selectedContact && event.payload.userId === selectedContact.uid) {
+          setIsPeerTyping(event.payload.isTyping);
+        }
+      } else if (event.type === 'reaction') {
+        const { messageId, userId, emoji, action } = event.payload;
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== messageId) return m;
+            const reactions = { ...(m.reactions || {}) };
+            const users = reactions[emoji] || [];
+            if (action === 'add' && !users.includes(userId)) {
+              reactions[emoji] = [...users, userId];
+            } else if (action === 'remove') {
+              reactions[emoji] = users.filter((u) => u !== userId);
+              if (reactions[emoji].length === 0) delete reactions[emoji];
+            }
+            return { ...m, reactions };
+          })
+        );
+      } else if (event.type === 'edit') {
+        const { messageId, content, editedAt } = event.payload;
+        setMessages((prev) =>
+          prev.map((m) => (m.id === messageId ? { ...m, content, isEdited: true, editedAt } : m))
+        );
+      } else if (event.type === 'delete') {
+        const { messageId } = event.payload;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === messageId ? { ...m, isDeleted: true, content: 'This message was deleted' } : m
           )
         );
       } else if (event.type === 'contact') {
@@ -103,7 +145,7 @@ export const App: React.FC = () => {
       unsubscribe();
       lynqClient.disconnect();
     };
-  }, [currentUserId]);
+  }, [currentUserId, selectedContact]);
 
   const toggleTheme = () => {
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
@@ -111,11 +153,11 @@ export const App: React.FC = () => {
     document.documentElement.setAttribute('data-theme', nextTheme);
   };
 
-  const handleSendMessage = (content: string) => {
+  const handleSendMessage = (content: string, replyToId?: string) => {
     if (!selectedContact) return;
 
     if (client) {
-      const msg = client.sendMessage(selectedContact.uid, content);
+      const msg = client.sendMessage(selectedContact.uid, content, replyToId);
       setMessages((prev) => [...prev, msg]);
     } else {
       const fallbackMsg: Message = {
@@ -128,6 +170,7 @@ export const App: React.FC = () => {
         content,
         timestamp: Date.now(),
         status: 'sent',
+        replyToId,
         reactions: {},
         isEdited: false,
         isDeleted: false,
@@ -135,6 +178,59 @@ export const App: React.FC = () => {
       };
       setMessages((prev) => [...prev, fallbackMsg]);
     }
+  };
+
+  const handleSendTyping = () => {
+    if (!selectedContact || !client) return;
+    const convId = [currentUserId, selectedContact.uid].sort().join('_');
+    client.sendTyping(selectedContact.uid, convId);
+  };
+
+  const handleReact = (messageId: string, emoji: string) => {
+    if (!selectedContact) return;
+
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== messageId) return m;
+        const reactions = { ...(m.reactions || {}) };
+        const users = reactions[emoji] || [];
+        const action = users.includes(currentUserId) ? 'remove' : 'add';
+
+        if (action === 'add') {
+          reactions[emoji] = [...users, currentUserId];
+        } else {
+          reactions[emoji] = users.filter((u) => u !== currentUserId);
+          if (reactions[emoji].length === 0) delete reactions[emoji];
+        }
+
+        client?.sendReaction(selectedContact.uid, messageId, emoji, action);
+        return { ...m, reactions };
+      })
+    );
+  };
+
+  const handleEditMessage = (messageId: string, newContent: string) => {
+    if (!selectedContact) return;
+    setMessages((prev) =>
+      prev.map((m) => (m.id === messageId ? { ...m, content: newContent, isEdited: true, editedAt: Date.now() } : m))
+    );
+    client?.sendEdit(selectedContact.uid, messageId, newContent);
+  };
+
+  const handleDeleteMessage = (messageId: string) => {
+    if (!selectedContact) return;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId ? { ...m, isDeleted: true, content: 'This message was deleted' } : m
+      )
+    );
+    client?.sendDelete(selectedContact.uid, messageId);
+  };
+
+  const handlePinMessage = (messageId: string) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === messageId ? { ...m, isPinned: !m.isPinned } : m))
+    );
   };
 
   const handleInitiateCall = (type: 'voice' | 'video') => {
@@ -150,6 +246,15 @@ export const App: React.FC = () => {
   const handlePairWithToken = (token: string) => {
     alert(`Pairing token "${token}" submitted to local networking service!`);
   };
+
+  // QR Payload for this node
+  const qrPayload = JSON.stringify({
+    protocol: 'LYNQ_PAIR_V1',
+    token: myToken,
+    uid: currentUserId,
+    username,
+    timestamp: Date.now(),
+  });
 
   // Filter messages for active chat
   const activeConversationMessages = messages.filter((m) => {
@@ -185,17 +290,24 @@ export const App: React.FC = () => {
         contact={selectedContact}
         currentUserId={currentUserId}
         messages={activeConversationMessages}
+        isPeerTyping={isPeerTyping}
         onSendMessage={handleSendMessage}
+        onSendTyping={handleSendTyping}
+        onReact={handleReact}
+        onEditMessage={handleEditMessage}
+        onDeleteMessage={handleDeleteMessage}
+        onPinMessage={handlePinMessage}
         onInitiateCall={handleInitiateCall}
         onSendFile={handleSendFile}
         networkStatus={networkStatus}
       />
 
-      {/* Pairing Modal */}
+      {/* Pairing Modal with QR code */}
       <PairingModal
         isOpen={isPairingOpen}
         onClose={() => setIsPairingOpen(false)}
         myToken={myToken}
+        qrPayload={qrPayload}
         onPairWithToken={handlePairWithToken}
       />
     </div>

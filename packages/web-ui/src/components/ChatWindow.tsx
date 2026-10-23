@@ -5,27 +5,46 @@ interface ChatWindowProps {
   contact: Contact | null;
   currentUserId: string;
   messages: Message[];
-  onSendMessage: (content: string) => void;
+  isPeerTyping: boolean;
+  onSendMessage: (content: string, replyToId?: string) => void;
+  onSendTyping: () => void;
+  onReact: (messageId: string, emoji: string) => void;
+  onEditMessage: (messageId: string, newContent: string) => void;
+  onDeleteMessage: (messageId: string) => void;
+  onPinMessage: (messageId: string) => void;
   onInitiateCall: (type: 'voice' | 'video') => void;
   onSendFile: () => void;
   networkStatus: { connected: boolean; url: string };
 }
 
+const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
+
 export const ChatWindow: React.FC<ChatWindowProps> = ({
   contact,
   currentUserId,
   messages,
+  isPeerTyping,
   onSendMessage,
+  onSendTyping,
+  onReact,
+  onEditMessage,
+  onDeleteMessage,
+  onPinMessage,
   onInitiateCall,
   onSendFile,
   networkStatus,
 }) => {
   const [inputText, setInputText] = useState('');
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, isPeerTyping]);
 
   if (!contact) {
     return (
@@ -40,16 +59,34 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   }
 
   const handleSend = () => {
+    if (editingMessageId) {
+      if (editText.trim()) {
+        onEditMessage(editingMessageId, editText.trim());
+      }
+      setEditingMessageId(null);
+      setEditText('');
+      return;
+    }
+
     if (inputText.trim()) {
-      onSendMessage(inputText.trim());
+      onSendMessage(inputText.trim(), replyingTo?.id);
       setInputText('');
+      setReplyingTo(null);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       handleSend();
+    } else {
+      onSendTyping();
     }
+  };
+
+  const startEdit = (msg: Message) => {
+    setEditingMessageId(msg.id);
+    setEditText(msg.content);
+    setReplyingTo(null);
   };
 
   const formatTime = (ts: number): string => {
@@ -73,7 +110,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
+  const getReplyingMessage = (replyToId?: string): Message | undefined => {
+    if (!replyToId) return undefined;
+    return messages.find((m) => m.id === replyToId);
+  };
+
   const initial = (contact.username ? contact.username[0] : '?').toUpperCase();
+  const pinnedMessage = messages.find((m) => m.isPinned);
 
   return (
     <main className="chat-workspace">
@@ -87,42 +130,66 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           <div>
             <div className="chat-header-title">{contact.username}</div>
             <div className="chat-header-subtitle">
-              {contact.status === 'online' ? 'Online on LAN' : 'Offline'} • {contact.ipAddress}
+              {isPeerTyping ? (
+                <span style={{ color: 'var(--accent)', fontWeight: 600 }}>typing...</span>
+              ) : contact.status === 'online' ? (
+                'Online on LAN'
+              ) : (
+                'Offline'
+              )}{' '}
+              • {contact.ipAddress}
             </div>
           </div>
         </div>
 
         <div className="chat-actions">
-          <button
-            className="action-btn"
-            title="Voice Call"
-            onClick={() => onInitiateCall('voice')}
-          >
+          <button className="action-btn" title="Voice Call" onClick={() => onInitiateCall('voice')}>
             📞
           </button>
-          <button
-            className="action-btn"
-            title="Video Call"
-            onClick={() => onInitiateCall('video')}
-          >
+          <button className="action-btn" title="Video Call" onClick={() => onInitiateCall('video')}>
             📹
           </button>
-          <button
-            className="action-btn"
-            title="Attach & Send File"
-            onClick={onSendFile}
-          >
+          <button className="action-btn" title="Send File" onClick={onSendFile}>
             📎
           </button>
         </div>
       </header>
 
+      {/* Pinned Message Banner */}
+      {pinnedMessage && (
+        <div
+          style={{
+            background: 'var(--bg-active)',
+            borderBottom: '1px solid var(--border-subtle)',
+            padding: '8px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            fontSize: '12.5px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+            <span>📌</span>
+            <span style={{ fontWeight: 600, color: 'var(--accent)' }}>Pinned:</span>
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {pinnedMessage.content}
+            </span>
+          </div>
+          <button
+            onClick={() => onPinMessage(pinnedMessage.id)}
+            style={{ background: 'none', border: 'none', color: 'gray', cursor: 'pointer' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Diagnostics Banner */}
       <div className="diagnostics-banner">
-        <span>⚡ Direct LAN Channel</span>
+        <span>⚡ Direct Local Connection</span>
         <div className="diagnostics-tags">
-          <span className="tag-badge">Signaling: {networkStatus.connected ? 'Active (WS)' : 'Reconnecting...'}</span>
-          <span className="tag-badge">Peer: {contact.ipAddress}:{contact.port}</span>
+          <span className="tag-badge">Signaling: {networkStatus.connected ? 'Active' : 'Offline'}</span>
+          <span className="tag-badge">Transport: WebRTC DataChannel Ready</span>
           <span className="tag-badge">{contact.isPaired ? '🔒 Authenticated' : '⚠️ Unpaired'}</span>
         </div>
       </div>
@@ -131,15 +198,139 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       <div className="messages-container">
         {messages.map((msg) => {
           const isOutgoing = msg.senderId === currentUserId;
+          const isHovered = hoveredMessageId === msg.id;
+          const replyRef = getReplyingMessage(msg.replyToId);
 
           return (
             <div
               key={msg.id}
               className={`message-bubble-row ${isOutgoing ? 'outgoing' : 'incoming'}`}
+              onMouseEnter={() => setHoveredMessageId(msg.id)}
+              onMouseLeave={() => setHoveredMessageId(null)}
+              style={{ position: 'relative' }}
             >
+              {/* Quick Actions Hover Palette */}
+              {isHovered && !msg.isDeleted && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '-26px',
+                    [isOutgoing ? 'right' : 'left']: '10px',
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border-strong)',
+                    borderRadius: '20px',
+                    padding: '2px 8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: 'var(--shadow-md)',
+                    zIndex: 10,
+                  }}
+                >
+                  {QUICK_EMOJIS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      onClick={() => onReact(msg.id, emoji)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px' }}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setReplyingTo(msg)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', marginLeft: '4px' }}
+                    title="Reply"
+                  >
+                    ↩️
+                  </button>
+                  <button
+                    onClick={() => onPinMessage(msg.id)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px' }}
+                    title="Pin"
+                  >
+                    📌
+                  </button>
+                  {isOutgoing && (
+                    <>
+                      <button
+                        onClick={() => startEdit(msg)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px' }}
+                        title="Edit"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        onClick={() => onDeleteMessage(msg.id)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px' }}
+                        title="Delete"
+                      >
+                        🗑️
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+
               <div className={`message-bubble ${isOutgoing ? 'outgoing' : 'incoming'}`}>
-                <div className="message-content">{msg.content}</div>
+                {/* Replying quote preview */}
+                {replyRef && (
+                  <div
+                    style={{
+                      background: 'rgba(0, 0, 0, 0.15)',
+                      borderLeft: '3px solid var(--accent)',
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      marginBottom: '6px',
+                      fontSize: '12px',
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, color: 'var(--accent)' }}>
+                      {replyRef.senderId === currentUserId ? 'You' : contact.username}
+                    </div>
+                    <div style={{ opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {replyRef.content}
+                    </div>
+                  </div>
+                )}
+
+                {/* Message Content */}
+                <div
+                  className="message-content"
+                  style={{
+                    fontStyle: msg.isDeleted ? 'italic' : 'normal',
+                    opacity: msg.isDeleted ? 0.7 : 1,
+                  }}
+                >
+                  {msg.content}
+                </div>
+
+                {/* Reactions badge display */}
+                {msg.reactions && Object.keys(msg.reactions).length > 0 && (
+                  <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
+                    {Object.entries(msg.reactions).map(([emoji, users]) => (
+                      <span
+                        key={emoji}
+                        onClick={() => onReact(msg.id, emoji)}
+                        style={{
+                          background: 'rgba(0, 0, 0, 0.25)',
+                          borderRadius: '10px',
+                          padding: '1px 6px',
+                          fontSize: '11px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {emoji} {users.length > 1 ? users.length : ''}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Footer: Time, Edited status, Delivery tick */}
                 <div className="message-footer">
+                  {msg.isPinned && <span style={{ fontSize: '10px' }}>📌</span>}
+                  {msg.isEdited && !msg.isDeleted && (
+                    <span style={{ fontSize: '10px', opacity: 0.7 }}>edited</span>
+                  )}
                   <span className="message-timestamp">{formatTime(msg.timestamp)}</span>
                   {renderStatusTicks(msg)}
                 </div>
@@ -147,34 +338,96 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
           );
         })}
+
+        {/* Live typing indicator indicator */}
+        {isPeerTyping && (
+          <div className="message-bubble-row incoming">
+            <div className="message-bubble incoming" style={{ padding: '8px 14px' }}>
+              <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                {contact.username} is typing...
+              </span>
+            </div>
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Reply Quote Banner above composer */}
+      {replyingTo && (
+        <div
+          style={{
+            background: 'var(--bg-active)',
+            borderTop: '1px solid var(--border-subtle)',
+            padding: '8px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            fontSize: '13px',
+          }}
+        >
+          <div>
+            <span style={{ fontWeight: 600, color: 'var(--accent)' }}>
+              Replying to {replyingTo.senderId === currentUserId ? 'yourself' : contact.username}:
+            </span>{' '}
+            <span style={{ color: 'var(--text-secondary)' }}>{replyingTo.content}</span>
+          </div>
+          <button
+            onClick={() => setReplyingTo(null)}
+            style={{ background: 'none', border: 'none', color: 'gray', cursor: 'pointer', fontSize: '14px' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Edit Banner above composer */}
+      {editingMessageId && (
+        <div
+          style={{
+            background: 'var(--bg-active)',
+            borderTop: '1px solid var(--border-subtle)',
+            padding: '8px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            fontSize: '13px',
+          }}
+        >
+          <span style={{ fontWeight: 600, color: 'var(--accent)' }}>Editing message</span>
+          <button
+            onClick={() => {
+              setEditingMessageId(null);
+              setEditText('');
+            }}
+            style={{ background: 'none', border: 'none', color: 'gray', cursor: 'pointer', fontSize: '14px' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Message Composer */}
       <footer className="chat-composer">
-        <button
-          className="action-btn"
-          title="Send File"
-          onClick={onSendFile}
-        >
+        <button className="action-btn" title="Send File" onClick={onSendFile}>
           📎
         </button>
 
         <input
           type="text"
           className="composer-input"
-          placeholder="Type a message..."
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
+          placeholder={editingMessageId ? 'Edit your message...' : 'Type a message...'}
+          value={editingMessageId ? editText : inputText}
+          onChange={(e) => (editingMessageId ? setEditText(e.target.value) : setInputText(e.target.value))}
           onKeyDown={handleKeyDown}
           autoFocus
         />
 
         <button
           className="send-btn"
-          title="Send Message"
+          title="Send"
           onClick={handleSend}
-          disabled={!inputText.trim()}
+          disabled={editingMessageId ? !editText.trim() : !inputText.trim()}
         >
           ➤
         </button>

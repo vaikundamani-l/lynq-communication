@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import QRCode from 'qrcode';
 
 interface PairingModalProps {
   isOpen: boolean;
   onClose: () => void;
   myToken: string;
+  qrPayload: string;
   onPairWithToken: (token: string) => void;
 }
 
@@ -11,10 +13,27 @@ export const PairingModal: React.FC<PairingModalProps> = ({
   isOpen,
   onClose,
   myToken,
+  qrPayload,
   onPairWithToken,
 }) => {
   const [inputToken, setInputToken] = useState('');
   const [copied, setCopied] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
+
+  useEffect(() => {
+    if (qrPayload) {
+      QRCode.toDataURL(qrPayload, {
+        width: 180,
+        margin: 1,
+        color: {
+          dark: '#005c4b',
+          light: '#ffffff',
+        },
+      })
+        .then((url: string) => setQrDataUrl(url))
+        .catch(() => setQrDataUrl(''));
+    }
+  }, [qrPayload]);
 
   if (!isOpen) return null;
 
@@ -37,7 +56,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3 className="modal-title">Device Pairing</h3>
+          <h3 className="modal-title">Device Pairing & Authentication</h3>
           <button
             onClick={onClose}
             style={{ background: 'none', border: 'none', color: 'gray', fontSize: '20px', cursor: 'pointer' }}
@@ -46,23 +65,41 @@ export const PairingModal: React.FC<PairingModalProps> = ({
           </button>
         </div>
 
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-          Pair with compatible devices on your local network to verify peer identity and allow secure direct file transfers.
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
+          Pair with nearby devices on your local network to verify peer identity and allow secure direct file transfers.
         </p>
 
-        {/* Local Invitation Token Box */}
-        <div style={{ marginBottom: '20px' }}>
-          <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>
-            YOUR PAIRING CODE:
-          </label>
-          <div className="token-display-box">
-            <div className="token-digits">{myToken || 'LYNQ01'}</div>
+        {/* QR Code and Token Row */}
+        <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginBottom: '20px' }}>
+          {qrDataUrl && (
+            <div
+              style={{
+                background: '#ffffff',
+                padding: '8px',
+                borderRadius: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: 'var(--shadow-md)',
+              }}
+            >
+              <img src={qrDataUrl} alt="Pairing QR Code" style={{ width: '130px', height: '130px', display: 'block' }} />
+            </div>
+          )}
+
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              Your Pairing Code
+            </label>
+            <div className="token-display-box" style={{ margin: '6px 0', padding: '10px' }}>
+              <div className="token-digits" style={{ fontSize: '24px' }}>{myToken || 'LYNQ01'}</div>
+            </div>
             <button
               onClick={handleCopy}
               className="action-btn"
-              style={{ margin: '8px auto 0', width: 'auto', padding: '4px 12px', fontSize: '12px' }}
+              style={{ width: '100%', height: '34px', fontSize: '12px', borderRadius: '6px', background: 'var(--bg-active)' }}
             >
-              {copied ? '✓ Copied' : '📋 Copy Code'}
+              {copied ? '✓ Copied to Clipboard' : '📋 Copy Code'}
             </button>
           </div>
         </div>
@@ -99,7 +136,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
               style={{ borderRadius: '8px', width: 'auto', padding: '0 16px', fontSize: '14px', fontWeight: 600 }}
               disabled={inputToken.trim().length < 4}
             >
-              Pair
+              Verify & Pair
             </button>
           </div>
         </form>

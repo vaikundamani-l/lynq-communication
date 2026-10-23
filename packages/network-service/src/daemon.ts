@@ -220,6 +220,44 @@ export class LynqDaemon extends EventEmitter {
         this.messageRepo.updateMessageStatus(ack.messageId, ack.status);
         this.emit('messageAck', ack);
       }
+    } else if (envelope.type === 'msg:typing') {
+      this.emit('peerTyping', envelope.payload);
+    } else if (envelope.type === 'msg:react') {
+      const reactPayload = envelope.payload as {
+        messageId: string;
+        userId: string;
+        emoji: string;
+        action: 'add' | 'remove';
+      };
+      if (reactPayload?.messageId) {
+        const msg = this.messageRepo.getMessageById(reactPayload.messageId);
+        if (msg) {
+          const reactions = msg.reactions || {};
+          const currentList = reactions[reactPayload.emoji] || [];
+          if (reactPayload.action === 'add' && !currentList.includes(reactPayload.userId)) {
+            reactions[reactPayload.emoji] = [...currentList, reactPayload.userId];
+          } else if (reactPayload.action === 'remove') {
+            reactions[reactPayload.emoji] = currentList.filter((u) => u !== reactPayload.userId);
+            if (reactions[reactPayload.emoji].length === 0) {
+              delete reactions[reactPayload.emoji];
+            }
+          }
+          this.messageRepo.updateReactions(reactPayload.messageId, reactions);
+        }
+      }
+      this.emit('messageReaction', reactPayload);
+    } else if (envelope.type === 'msg:edit') {
+      const editPayload = envelope.payload as { messageId: string; content: string; editedAt: number };
+      if (editPayload?.messageId && editPayload?.content) {
+        this.messageRepo.editMessage(editPayload.messageId, editPayload.content, editPayload.editedAt);
+      }
+      this.emit('messageEdited', editPayload);
+    } else if (envelope.type === 'msg:delete') {
+      const delPayload = envelope.payload as { messageId: string };
+      if (delPayload?.messageId) {
+        this.messageRepo.deleteMessage(delPayload.messageId);
+      }
+      this.emit('messageDeleted', delPayload);
     }
   }
 
