@@ -1,19 +1,26 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { EventEmitter } from 'node:events';
-import { SignalingEnvelope, generateUUID } from '@lynq/core';
+import { SignalingEnvelope, generateUUID, RateLimiter } from '@lynq/core';
 
 export interface SignalingServerOptions {
   port: number;
   host?: string;
+  maxPayloadBytes?: number;
+  rateLimitPerSec?: number;
 }
 
 export class SignalingServer extends EventEmitter {
   private wss: WebSocketServer | null = null;
   private clients = new Map<string, WebSocket>(); // uid -> WebSocket
   private isRunning = false;
+  private rateLimiter = new RateLimiter();
+  private maxPayloadBytes: number;
+  private rateLimitPerSec: number;
 
   constructor(private options: SignalingServerOptions) {
     super();
+    this.maxPayloadBytes = options.maxPayloadBytes || 512 * 1024; // 512 KB
+    this.rateLimitPerSec = options.rateLimitPerSec || 100;
   }
 
   public async start(): Promise<void> {
@@ -75,13 +82,28 @@ export class SignalingServer extends EventEmitter {
 
     ws.on('message', (rawData) => {
       try {
-        const envelope: SignalingEnvelope = JSON.parse(rawData.toString('utf8'));
+        const rawStr = rawData.toString('utf8');
+        if (rawStr.length > this.maxPayloadBytes) {
+          this.emit('securityViolation', { type: 'payload_too_large', size: rawStr.length });
+          return;
+        }
+
+        const envelope: SignalingEnvelope = JSON.parse(rawStr);
 
         // Register client on first message
         if (envelope.senderId && !clientUid) {
           clientUid = envelope.senderId;
           this.clients.set(clientUid, ws);
           this.emit('clientConnected', clientUid);
+        }
+
+        // Enforce rate limit per sender
+        if (envelope.senderId) {
+          const check = this.rateLimiter.checkLimit(envelope.senderId, this.rateLimitPerSec, 1000);
+          if (!check.allowed) {
+            this.emit('rateLimitExceeded', { senderId: envelope.senderId, remainingMs: check.resetMs });
+            return;
+          }
         }
 
         this.routeMessage(envelope, ws);

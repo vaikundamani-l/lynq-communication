@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { generatePairingToken, PairingRequest, Contact, DeviceInfo } from '@lynq/core';
+import { generatePairingToken, PairingRequest, Contact, DeviceInfo, RateLimiter } from '@lynq/core';
 import { ContactRepository } from '@lynq/storage';
 
 export interface ActivePairingSession {
@@ -11,6 +11,7 @@ export interface ActivePairingSession {
 export class PairingManager extends EventEmitter {
   private activeToken: ActivePairingSession | null = null;
   private readonly tokenTtlMs = 10 * 60 * 1000; // 10 minutes
+  private rateLimiter = new RateLimiter();
 
   constructor(
     private myUid: string,
@@ -55,6 +56,16 @@ export class PairingManager extends EventEmitter {
    * Verify an incoming pairing request with a presented token
    */
   public verifyPairingRequest(request: PairingRequest): { approved: boolean; error?: string } {
+    const limiterKey = request.requesterIp || request.requesterUid;
+    const lockout = this.rateLimiter.getLockoutStatus(limiterKey);
+
+    if (lockout.isLocked) {
+      return {
+        approved: false,
+        error: `Too many invalid pairing attempts. Locked out for ${Math.ceil(lockout.remainingLockoutMs / 1000)}s.`,
+      };
+    }
+
     if (!this.activeToken) {
       return { approved: false, error: 'No active pairing session on this host' };
     }
@@ -65,8 +76,15 @@ export class PairingManager extends EventEmitter {
     }
 
     if (request.pairingToken !== this.activeToken.token) {
-      return { approved: false, error: 'Invalid pairing token' };
+      const isNowLocked = this.rateLimiter.recordFailure(limiterKey, 5, 15 * 60 * 1000);
+      return {
+        approved: false,
+        error: isNowLocked ? 'Too many invalid attempts. Host locked out for 15 minutes.' : 'Invalid pairing token',
+      };
     }
+
+    // Success: clear failures
+    this.rateLimiter.reset(limiterKey);
 
     // Successfully verified! Save contact as paired
     const contact: Contact = {
