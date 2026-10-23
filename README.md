@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![CI](https://github.com/lynq/lynq-communication/actions/workflows/ci.yml/badge.svg)](https://github.com/lynq/lynq-communication/actions)
+[![CI](https://github.com/vaikundamani-l/lynq-communication/actions/workflows/ci.yml/badge.svg)](https://github.com/vaikundamani-l/lynq-communication/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tests Passing](https://img.shields.io/badge/Tests-38%2F38%20Passing-brightgreen.svg)](packages/)
 [![Security: Audited](https://img.shields.io/badge/Security-Local--First%20%7C%20Zero--Cloud-success.svg)](SECURITY.md)
@@ -122,7 +122,7 @@ lynq-communication/
 
 ### For End Users (Prebuilt Releases)
 Ordinary users do not need Node.js, Git, or compilers:
-1. Navigate to the [Releases](https://github.com/lynq/lynq-communication/releases) page on GitHub.
+1. Navigate to the [Releases](https://github.com/vaikundamani-l/lynq-communication/releases) page on GitHub.
 2. Download the package for your platform:
    - **Linux**: Download `.AppImage` (make executable: `chmod +x lynq*.AppImage && ./lynq*.AppImage`) or `.deb`.
    - **Windows**: Download and run `.msi` or `.exe`.
@@ -132,7 +132,7 @@ Ordinary users do not need Node.js, Git, or compilers:
 ### For Developers & Contributors
 ```bash
 # 1. Clone repository
-git clone https://github.com/lynq/lynq-communication.git
+git clone https://github.com/vaikundamani-l/lynq-communication.git
 cd lynq-communication
 
 # 2. Install workspace dependencies

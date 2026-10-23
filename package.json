@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "description": "LYNQ Communication: Ultra-fast local-first cross-platform communication platform",
+  "author": "Vaikundamani L <l.vaikundamani@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vaikundamani-l/lynq-communication.git"
+  },
   "workspaces": [
     "packages/*"
   ],

@@ -39,7 +39,8 @@ export type SignalingType =
   // Heartbeat & Presence
   | 'ping'
   | 'pong'
-  | 'presence:update';
+  | 'presence:update'
+  | 'presence:list';
 
 export interface SignalingEnvelope<T = unknown> {
   id: string;

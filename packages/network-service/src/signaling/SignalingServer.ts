@@ -12,6 +12,7 @@ export interface SignalingServerOptions {
 export class SignalingServer extends EventEmitter {
   private wss: WebSocketServer | null = null;
   private clients = new Map<string, WebSocket>(); // uid -> WebSocket
+  private clientMetadata = new Map<string, any>(); // uid -> metadata
   private isRunning = false;
   private rateLimiter = new RateLimiter();
   private maxPayloadBytes: number;
@@ -115,7 +116,18 @@ export class SignalingServer extends EventEmitter {
     ws.on('close', () => {
       if (clientUid) {
         this.clients.delete(clientUid);
+        this.clientMetadata.delete(clientUid);
         this.emit('clientDisconnected', clientUid);
+
+        // Announce peer departure to all other connected clients
+        this.broadcast({
+          id: generateUUID(),
+          type: 'presence:update',
+          senderId: 'server',
+          recipientId: '*',
+          timestamp: Date.now(),
+          payload: { uid: clientUid, status: 'offline' },
+        });
       }
     });
 
@@ -141,6 +153,46 @@ export class SignalingServer extends EventEmitter {
       return;
     }
 
+    // Handle peer presence announcement & sync
+    if (type === 'presence:update') {
+      const peerInfo = envelope.payload as any;
+      if (peerInfo && envelope.senderId) {
+        this.clientMetadata.set(envelope.senderId, peerInfo);
+
+        // 1. Announce this peer to all other connected clients
+        this.broadcast(
+          {
+            id: generateUUID(),
+            type: 'presence:update',
+            senderId: envelope.senderId,
+            recipientId: '*',
+            timestamp: Date.now(),
+            payload: peerInfo,
+          },
+          envelope.senderId
+        );
+
+        // 2. Send the newly connected client the directory of all existing connected peers
+        const currentPeers = Array.from(this.clientMetadata.entries())
+          .filter(([uid]) => uid !== envelope.senderId)
+          .map(([_, info]) => info);
+
+        if (currentPeers.length > 0) {
+          senderWs.send(
+            JSON.stringify({
+              id: generateUUID(),
+              type: 'presence:list',
+              senderId: 'server',
+              recipientId: envelope.senderId,
+              timestamp: Date.now(),
+              payload: currentPeers,
+            })
+          );
+        }
+      }
+      return;
+    }
+
     // Forward to destination recipient if connected
     const targetWs = this.clients.get(recipientId);
     if (targetWs && targetWs.readyState === WebSocket.OPEN) {
@@ -149,6 +201,19 @@ export class SignalingServer extends EventEmitter {
 
     // Emit event locally for application handling
     this.emit('message', envelope);
+  }
+
+  public broadcast(envelope: SignalingEnvelope, excludeUid?: string): void {
+    const data = JSON.stringify(envelope);
+    for (const [uid, ws] of this.clients.entries()) {
+      if (uid !== excludeUid && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(data);
+        } catch {
+          // ignore send error
+        }
+      }
+    }
   }
 
   public sendToClient(recipientId: string, envelope: SignalingEnvelope): boolean {

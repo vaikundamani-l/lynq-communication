@@ -10,7 +10,7 @@ import {
   sanitizeFilename,
 } from '@lynq/core';
 import { CallSessionEngine } from '@lynq/p2p-engine';
-import { LynqClient } from './services/LynqClient';
+import { LynqClient, getDefaultSignalingUrl } from './services/LynqClient';
 import { SidebarRail, NavTab } from './components/SidebarRail';
 import { ConversationList } from './components/ConversationList';
 import { ChatWindow } from './components/ChatWindow';
@@ -28,8 +28,30 @@ import './styles/theme.css';
 export const App: React.FC = () => {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [activeTab, setActiveTab] = useState<NavTab>('chats');
-  const [currentUserId] = useState(() => 'user_' + generateUUID().slice(0, 8));
-  const [username, setUsername] = useState('LocalHost');
+  const [currentUserId] = useState(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const saved = window.localStorage.getItem('lynq_uid');
+      if (saved) return saved;
+      const newUid = 'user_' + generateUUID().slice(0, 8);
+      window.localStorage.setItem('lynq_uid', newUid);
+      return newUid;
+    }
+    return 'user_' + generateUUID().slice(0, 8);
+  });
+
+  const [username, setUsernameState] = useState(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const saved = window.localStorage.getItem('lynq_username');
+      if (saved) return saved;
+      const isMobile =
+        typeof navigator !== 'undefined' && /android|iphone|ipad|mobile/i.test(navigator.userAgent);
+      const defaultName = isMobile ? 'Mobile Phone' : 'Ubuntu Laptop';
+      window.localStorage.setItem('lynq_username', defaultName);
+      return defaultName;
+    }
+    return 'Ubuntu Laptop';
+  });
+
   const [downloadPath, setDownloadPath] = useState('/home/shadow-khan/Downloads/LYNQ');
   const [myToken] = useState(() => generatePairingToken());
   const [isPairingOpen, setIsPairingOpen] = useState(false);
@@ -37,7 +59,7 @@ export const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
   const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
-  const [networkStatus, setNetworkStatus] = useState({ connected: false, url: 'ws://127.0.0.1:4848' });
+  const [networkStatus, setNetworkStatus] = useState({ connected: false, url: getDefaultSignalingUrl() });
   const [isPeerTyping, setIsPeerTyping] = useState(false);
   const [activeTransfers, setActiveTransfers] = useState<FileTransfer[]>([]);
   const [incomingTransfer, setIncomingTransfer] = useState<FileTransfer | null>(null);
@@ -136,9 +158,17 @@ export const App: React.FC = () => {
 
   const [client, setClient] = useState<LynqClient | null>(null);
 
+  const setUsername = (newName: string) => {
+    setUsernameState(newName);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem('lynq_username', newName);
+    }
+    client?.updateUsername(newName);
+  };
+
   // Initialize client
   useEffect(() => {
-    const lynqClient = new LynqClient(currentUserId);
+    const lynqClient = new LynqClient(currentUserId, username, getDefaultSignalingUrl());
     lynqClient.connect();
 
     const engine = new CallSessionEngine(currentUserId, username, {
@@ -241,10 +271,16 @@ export const App: React.FC = () => {
           )
         );
       } else if (event.type === 'contact') {
-        setContacts((prev) => {
-          const exists = prev.some((c) => c.uid === event.payload.uid);
-          return exists ? prev.map((c) => (c.uid === event.payload.uid ? event.payload : c)) : [...prev, event.payload];
-        });
+        const peer = event.payload;
+        if (peer.uid !== currentUserId) {
+          setContacts((prev) => {
+            const exists = prev.some((c) => c.uid === peer.uid);
+            return exists
+              ? prev.map((c) => (c.uid === peer.uid ? { ...c, ...peer } : c))
+              : [peer, ...prev.filter((c) => c.uid !== peer.uid)];
+          });
+          setSelectedContact((current) => current || peer);
+        }
       }
     });
 

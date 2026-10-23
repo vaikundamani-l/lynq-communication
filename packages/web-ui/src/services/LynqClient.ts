@@ -17,16 +17,27 @@ export type LynqClientEvent =
   | { type: 'status'; payload: { connected: boolean; url: string } }
   | { type: 'signaling'; payload: SignalingEnvelope };
 
+export const getDefaultSignalingUrl = (): string => {
+  if (typeof window !== 'undefined' && window.location) {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.hostname || '127.0.0.1';
+    return `${protocol}//${host}:4848`;
+  }
+  return 'ws://127.0.0.1:4848';
+};
+
 export class LynqClient {
   private ws: WebSocket | null = null;
   private url: string;
   private myUid: string;
+  private username: string;
   private listeners: ((event: LynqClientEvent) => void)[] = [];
   private reconnectTimer: any = null;
   private typingTimer: any = null;
 
-  constructor(myUid: string, url = 'ws://127.0.0.1:4848') {
+  constructor(myUid: string, username = 'Peer', url = getDefaultSignalingUrl()) {
     this.myUid = myUid;
+    this.username = username;
     this.url = url;
   }
 
@@ -40,14 +51,31 @@ export class LynqClient {
 
       this.ws.onopen = () => {
         this.emit({ type: 'status', payload: { connected: true, url: this.url } });
-        // Register client on daemon
+        // Register client presence on daemon
         this.sendEnvelope({
           id: generateUUID(),
-          type: 'ping',
+          type: 'presence:update',
           senderId: this.myUid,
           recipientId: 'server',
           timestamp: Date.now(),
-          payload: null,
+          payload: {
+            uid: this.myUid,
+            username: this.username,
+            ipAddress: typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1',
+            port: 4848,
+            status: 'online',
+            isPaired: true,
+            lastSeen: Date.now(),
+            deviceInfo: {
+              deviceId: 'dev_' + this.myUid,
+              deviceName: this.username,
+              platform:
+                typeof navigator !== 'undefined' && /android|iphone|ipad|mobile/i.test(navigator.userAgent)
+                  ? 'android'
+                  : 'linux',
+              appVersion: '0.1.0',
+            },
+          },
         });
       };
 
@@ -56,6 +84,17 @@ export class LynqClient {
           const envelope: SignalingEnvelope = JSON.parse(event.data);
           this.emit({ type: 'signaling', payload: envelope });
           switch (envelope.type) {
+            case 'presence:update':
+              this.emit({ type: 'contact', payload: envelope.payload as Contact });
+              break;
+            case 'presence:list':
+              const peers = envelope.payload as Contact[];
+              if (Array.isArray(peers)) {
+                peers.forEach((peer) => {
+                  this.emit({ type: 'contact', payload: peer });
+                });
+              }
+              break;
             case 'msg:send':
               this.emit({ type: 'message', payload: envelope.payload as Message });
               break;
@@ -244,6 +283,23 @@ export class LynqClient {
       timestamp: Date.now(),
       payload: {
         messageId,
+      },
+    });
+  }
+
+  public updateUsername(newName: string): void {
+    this.username = newName;
+    this.sendEnvelope({
+      id: generateUUID(),
+      type: 'presence:update',
+      senderId: this.myUid,
+      recipientId: 'server',
+      timestamp: Date.now(),
+      payload: {
+        uid: this.myUid,
+        username: newName,
+        status: 'online',
+        lastSeen: Date.now(),
       },
     });
   }
