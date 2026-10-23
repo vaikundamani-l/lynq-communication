@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Contact, Message, FileTransfer } from '@lynq/core';
+import { Contact, Message, FileTransfer, Group } from '@lynq/core';
 import { FileTransferItem } from './FileTransferItem';
 
 interface ChatWindowProps {
   contact: Contact | null;
+  group?: Group | null;
   currentUserId: string;
   messages: Message[];
   activeTransfers?: FileTransfer[];
@@ -26,6 +27,7 @@ const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({
   contact,
+  group,
   currentUserId,
   messages,
   activeTransfers = [],
@@ -49,6 +51,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [editText, setEditText] = useState('');
   const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [showMembersDrawer, setShowMembersDrawer] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -57,17 +60,27 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isPeerTyping]);
 
-  if (!contact) {
+  if (!contact && !group) {
     return (
       <main className="chat-workspace">
         <div className="empty-chat-state">
           <div className="empty-icon">💬</div>
           <h2>Welcome to LYNQ Communication</h2>
-          <p>Select a contact or LAN peer from the sidebar to start ultra-fast local messaging.</p>
+          <p>Select a contact or private group from the sidebar to start ultra-fast local messaging.</p>
         </div>
       </main>
     );
   }
+
+  const title = group ? group.name : (contact?.username || '');
+  const subtitle = group
+    ? `${group.members.length} members`
+    : (isPeerTyping
+        ? 'typing...'
+        : contact?.status === 'online'
+        ? 'Online on LAN'
+        : 'Offline') + ` • ${contact?.ipAddress || ''}`;
+  const initial = (title ? title[0] : '?').toUpperCase();
 
   const handleSend = () => {
     if (editingMessageId) {
@@ -136,7 +149,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     return messages.find((m) => m.id === replyToId);
   };
 
-  const initial = (contact.username ? contact.username[0] : '?').toUpperCase();
   const pinnedMessage = messages.find((m) => m.isPinned);
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -192,7 +204,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           }}
         >
           <div style={{ textAlign: 'center', color: 'var(--accent)', fontWeight: 700, fontSize: '20px' }}>
-            📁 Drop files here to send directly to {contact.username}
+            📁 Drop files here to send directly to {contact?.username || group?.name || 'peer'}
           </div>
         </div>
       )}
@@ -200,25 +212,34 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       <header className="chat-header">
         <div className="chat-header-user">
           <div className="avatar-wrapper" style={{ width: '40px', height: '40px', minWidth: '40px' }}>
-            <div className="avatar" style={{ fontSize: '15px' }}>{initial}</div>
-            <div className={`presence-badge ${contact.status || 'offline'}`} />
+            <div
+              className="avatar"
+              style={{
+                fontSize: '15px',
+                background: group ? 'linear-gradient(135deg, #2563eb, #7c3aed)' : undefined,
+              }}
+            >
+              {group ? '👥' : initial}
+            </div>
+            {!group && <div className={`presence-badge ${contact?.status || 'offline'}`} />}
           </div>
           <div>
-            <div className="chat-header-title">{contact.username}</div>
-            <div className="chat-header-subtitle">
-              {isPeerTyping ? (
-                <span style={{ color: 'var(--accent)', fontWeight: 600 }}>typing...</span>
-              ) : contact.status === 'online' ? (
-                'Online on LAN'
-              ) : (
-                'Offline'
-              )}{' '}
-              • {contact.ipAddress}
-            </div>
+            <div className="chat-header-title">{title}</div>
+            <div className="chat-header-subtitle">{subtitle}</div>
           </div>
         </div>
 
         <div className="chat-actions">
+          {group && (
+            <button
+              className="action-btn"
+              title="View Group Members"
+              onClick={() => setShowMembersDrawer((prev) => !prev)}
+              style={{ width: 'auto', padding: '0 10px', fontSize: '13px', gap: '4px' }}
+            >
+              👥 Members ({group.members.length})
+            </button>
+          )}
           <button className="action-btn" title="Voice Call" onClick={() => onInitiateCall('voice')}>
             📞
           </button>
@@ -271,7 +292,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             {networkStatus.connected ? 'Signaling: Connected' : 'Signaling: Reconnecting...'}
           </span>
           <span className="tag-badge">Transport: WebRTC DataChannel Ready</span>
-          <span className="tag-badge">{contact.isPaired ? '🔒 Authenticated' : '⚠️ Unpaired'}</span>
+          <span className="tag-badge">
+            {group ? '🔒 Local Group' : contact?.isPaired ? '🔒 Authenticated' : '⚠️ Unpaired'}
+          </span>
         </div>
       </div>
 
@@ -292,20 +315,39 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       )}
 
       {/* Message Stream */}
-      <div className="messages-container">
-        {messages.map((msg) => {
-          const isOutgoing = msg.senderId === currentUserId;
-          const isHovered = hoveredMessageId === msg.id;
-          const replyRef = getReplyingMessage(msg.replyToId);
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <div className="messages-container" style={{ flex: 1 }}>
+          {messages.map((msg) => {
+            if (msg.type === 'system') {
+              return (
+                <div key={msg.id} style={{ display: 'flex', justifyContent: 'center', margin: '6px 0' }}>
+                  <span
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      borderRadius: '12px',
+                      padding: '3px 12px',
+                      fontSize: '11.5px',
+                      color: 'var(--text-muted)',
+                    }}
+                  >
+                    {msg.content}
+                  </span>
+                </div>
+              );
+            }
 
-          return (
-            <div
-              key={msg.id}
-              className={`message-bubble-row ${isOutgoing ? 'outgoing' : 'incoming'}`}
-              onMouseEnter={() => setHoveredMessageId(msg.id)}
-              onMouseLeave={() => setHoveredMessageId(null)}
-              style={{ position: 'relative' }}
-            >
+            const isOutgoing = msg.senderId === currentUserId;
+            const isHovered = hoveredMessageId === msg.id;
+            const replyRef = getReplyingMessage(msg.replyToId);
+
+            return (
+              <div
+                key={msg.id}
+                className={`message-bubble-row ${isOutgoing ? 'outgoing' : 'incoming'}`}
+                onMouseEnter={() => setHoveredMessageId(msg.id)}
+                onMouseLeave={() => setHoveredMessageId(null)}
+                style={{ position: 'relative' }}
+              >
               {/* Quick Actions Hover Palette */}
               {isHovered && !msg.isDeleted && (
                 <div
@@ -369,6 +411,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               )}
 
               <div className={`message-bubble ${isOutgoing ? 'outgoing' : 'incoming'}`}>
+                {group && !isOutgoing && (
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent)', marginBottom: '3px' }}>
+                    {msg.senderId}
+                  </div>
+                )}
+
                 {/* Replying quote preview */}
                 {replyRef && (
                   <div
@@ -382,7 +430,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                     }}
                   >
                     <div style={{ fontWeight: 600, color: 'var(--accent)' }}>
-                      {replyRef.senderId === currentUserId ? 'You' : contact.username}
+                      {replyRef.senderId === currentUserId ? 'You' : (contact?.username || group?.name || 'Peer')}
                     </div>
                     <div style={{ opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {replyRef.content}
@@ -441,7 +489,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           <div className="message-bubble-row incoming">
             <div className="message-bubble incoming" style={{ padding: '8px 14px' }}>
               <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                {contact.username} is typing...
+                {contact?.username || group?.name || 'Peer'} is typing...
               </span>
             </div>
           </div>
@@ -449,6 +497,68 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Group Members Drawer */}
+      {group && showMembersDrawer && (
+        <aside
+          style={{
+            width: '240px',
+            background: 'var(--bg-card)',
+            borderLeft: '1px solid var(--border-subtle)',
+            padding: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h4 style={{ fontSize: '13px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+              Members ({group.members.length})
+            </h4>
+            <button
+              onClick={() => setShowMembersDrawer(false)}
+              style={{ background: 'none', border: 'none', color: 'gray', cursor: 'pointer' }}
+            >
+              ✕
+            </button>
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {group.members.map((m) => (
+              <div
+                key={m.userId}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 0',
+                  borderBottom: '1px solid var(--border-subtle)',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 600 }}>
+                    {m.username} {m.userId === currentUserId ? '(You)' : ''}
+                  </div>
+                </div>
+                <span
+                  style={{
+                    fontSize: '10px',
+                    background: m.role === 'creator' ? 'var(--accent)' : 'var(--bg-active)',
+                    color: m.role === 'creator' ? '#ffffff' : 'var(--text-secondary)',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    fontWeight: 600,
+                    textTransform: 'capitalize',
+                  }}
+                >
+                  {m.role}
+                </span>
+              </div>
+            ))}
+          </div>
+        </aside>
+      )}
+    </div>
 
       {/* Reply Quote Banner above composer */}
       {replyingTo && (
@@ -465,7 +575,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         >
           <div>
             <span style={{ fontWeight: 600, color: 'var(--accent)' }}>
-              Replying to {replyingTo.senderId === currentUserId ? 'yourself' : contact.username}:
+              Replying to {replyingTo.senderId === currentUserId ? 'yourself' : (contact?.username || group?.name || 'peer')}:
             </span>{' '}
             <span style={{ color: 'var(--text-secondary)' }}>{replyingTo.content}</span>
           </div>

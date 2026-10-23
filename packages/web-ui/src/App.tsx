@@ -1,11 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { Contact, Message, FileTransfer, generateUUID, generatePairingToken, sanitizeFilename } from '@lynq/core';
+import {
+  Contact,
+  Message,
+  FileTransfer,
+  Group,
+  generateUUID,
+  generatePairingToken,
+  sanitizeFilename,
+} from '@lynq/core';
 import { LynqClient } from './services/LynqClient';
 import { SidebarRail, NavTab } from './components/SidebarRail';
 import { ConversationList } from './components/ConversationList';
 import { ChatWindow } from './components/ChatWindow';
 import { PairingModal } from './components/PairingModal';
 import { FileTransferModal } from './components/FileTransferModal';
+import { CreateGroupModal } from './components/CreateGroupModal';
 import './styles/theme.css';
 
 export const App: React.FC = () => {
@@ -15,12 +24,13 @@ export const App: React.FC = () => {
   const [username] = useState('LocalHost');
   const [myToken] = useState(() => generatePairingToken());
   const [isPairingOpen, setIsPairingOpen] = useState(false);
+  const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
   const [networkStatus, setNetworkStatus] = useState({ connected: false, url: 'ws://127.0.0.1:4848' });
   const [isPeerTyping, setIsPeerTyping] = useState(false);
   const [activeTransfers, setActiveTransfers] = useState<FileTransfer[]>([]);
   const [incomingTransfer, setIncomingTransfer] = useState<FileTransfer | null>(null);
 
-  // Initial contacts with default local network peer placeholder
+  // Initial contacts
   const [contacts, setContacts] = useState<Contact[]>([
     {
       uid: 'peer_node_1',
@@ -54,7 +64,26 @@ export const App: React.FC = () => {
     },
   ]);
 
+  // Initial groups
+  const [groups, setGroups] = useState<Group[]>([
+    {
+      id: 'grp_local_engineering',
+      name: 'Local Engineering',
+      description: 'LAN development and project updates',
+      creatorId: currentUserId,
+      members: [
+        { userId: currentUserId, username: 'LocalHost', role: 'creator', joinedAt: Date.now() - 3600000 },
+        { userId: 'peer_node_1', username: 'Ubuntu Laptop', role: 'admin', joinedAt: Date.now() - 3600000 },
+        { userId: 'peer_node_2', username: 'Android Phone', role: 'member', joinedAt: Date.now() - 3600000 },
+      ],
+      createdAt: Date.now() - 3600000,
+      updatedAt: Date.now() - 60000,
+      pinnedMessageIds: [],
+    },
+  ]);
+
   const [selectedContact, setSelectedContact] = useState<Contact | null>(contacts[0]);
+  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
 
   // Initial messages
   const [messages, setMessages] = useState<Message[]>([
@@ -69,6 +98,21 @@ export const App: React.FC = () => {
       timestamp: Date.now() - 60000,
       status: 'read',
       reactions: { '👍': ['peer_node_1'] },
+      isEdited: false,
+      isDeleted: false,
+      isPinned: false,
+    },
+    {
+      id: 'msg_group_welcome',
+      senderId: 'peer_node_1',
+      receiverId: 'grp_local_engineering',
+      conversationId: 'grp_local_engineering',
+      conversationType: 'group',
+      type: 'text',
+      content: 'Welcome to the Local Engineering private group! All members can post and transfer files directly.',
+      timestamp: Date.now() - 50000,
+      status: 'read',
+      reactions: { '🔥': [currentUserId] },
       isEdited: false,
       isDeleted: false,
       isPinned: false,
@@ -156,41 +200,113 @@ export const App: React.FC = () => {
     document.documentElement.setAttribute('data-theme', nextTheme);
   };
 
+  const handleSelectContact = (contact: Contact) => {
+    setSelectedContact(contact);
+    setSelectedGroup(null);
+  };
+
+  const handleSelectGroup = (group: Group) => {
+    setSelectedGroup(group);
+    setSelectedContact(null);
+  };
+
+  const handleCreateGroup = (name: string, description: string, selectedMemberIds: string[]) => {
+    const groupId = 'grp_' + generateUUID().slice(0, 8);
+    const now = Date.now();
+
+    const groupMembers = [
+      { userId: currentUserId, username, role: 'creator' as const, joinedAt: now },
+      ...contacts
+        .filter((c) => selectedMemberIds.includes(c.uid))
+        .map((c) => ({ userId: c.uid, username: c.username, role: 'member' as const, joinedAt: now })),
+    ];
+
+    const newGroup: Group = {
+      id: groupId,
+      name,
+      description,
+      creatorId: currentUserId,
+      members: groupMembers,
+      createdAt: now,
+      updatedAt: now,
+      pinnedMessageIds: [],
+    };
+
+    setGroups((prev) => [newGroup, ...prev]);
+    setSelectedGroup(newGroup);
+    setSelectedContact(null);
+
+    // Add system message
+    const sysMsg: Message = {
+      id: generateUUID(),
+      senderId: currentUserId,
+      receiverId: groupId,
+      conversationId: groupId,
+      conversationType: 'group',
+      type: 'system',
+      content: `Group "${name}" created with ${groupMembers.length} members`,
+      timestamp: now,
+      status: 'sent',
+      reactions: {},
+      isEdited: false,
+      isDeleted: false,
+      isPinned: false,
+    };
+    setMessages((prev) => [...prev, sysMsg]);
+  };
+
   const handleSendMessage = (content: string, replyToId?: string) => {
-    if (!selectedContact) return;
+    const targetRecipientId = selectedGroup ? selectedGroup.id : selectedContact?.uid;
+    if (!targetRecipientId) return;
+
+    const convId = selectedGroup
+      ? selectedGroup.id
+      : [currentUserId, selectedContact!.uid].sort().join('_');
+    const convType = selectedGroup ? 'group' : 'direct';
+
+    const newMsg: Message = {
+      id: generateUUID(),
+      senderId: currentUserId,
+      receiverId: targetRecipientId,
+      conversationId: convId,
+      conversationType: convType,
+      type: 'text',
+      content,
+      timestamp: Date.now(),
+      status: client ? 'sent' : 'pending',
+      replyToId,
+      reactions: {},
+      isEdited: false,
+      isDeleted: false,
+      isPinned: false,
+    };
+
+    setMessages((prev) => [...prev, newMsg]);
 
     if (client) {
-      const msg = client.sendMessage(selectedContact.uid, content, replyToId);
-      setMessages((prev) => [...prev, msg]);
-    } else {
-      const fallbackMsg: Message = {
-        id: generateUUID(),
-        senderId: currentUserId,
-        receiverId: selectedContact.uid,
-        conversationId: [currentUserId, selectedContact.uid].sort().join('_'),
-        conversationType: 'direct',
-        type: 'text',
-        content,
-        timestamp: Date.now(),
-        status: 'sent',
-        replyToId,
-        reactions: {},
-        isEdited: false,
-        isDeleted: false,
-        isPinned: false,
-      };
-      setMessages((prev) => [...prev, fallbackMsg]);
+      if (selectedGroup) {
+        // Send fan-out to all group members
+        for (const member of selectedGroup.members) {
+          if (member.userId !== currentUserId) {
+            client.sendMessage(member.userId, content, replyToId);
+          }
+        }
+      } else {
+        client.sendMessage(selectedContact!.uid, content, replyToId);
+      }
     }
   };
 
   const handleSendTyping = () => {
-    if (!selectedContact || !client) return;
-    const convId = [currentUserId, selectedContact.uid].sort().join('_');
-    client.sendTyping(selectedContact.uid, convId);
+    if (selectedContact && client) {
+      const convId = [currentUserId, selectedContact.uid].sort().join('_');
+      client.sendTyping(selectedContact.uid, convId);
+    }
   };
 
   const handleReact = (messageId: string, emoji: string) => {
-    if (!selectedContact) return;
+    const targetId = selectedGroup ? selectedGroup.id : selectedContact?.uid;
+    if (!targetId) return;
 
     setMessages((prev) =>
       prev.map((m) => {
@@ -206,28 +322,32 @@ export const App: React.FC = () => {
           if (reactions[emoji].length === 0) delete reactions[emoji];
         }
 
-        client?.sendReaction(selectedContact.uid, messageId, emoji, action);
+        if (selectedContact) {
+          client?.sendReaction(selectedContact.uid, messageId, emoji, action);
+        }
         return { ...m, reactions };
       })
     );
   };
 
   const handleEditMessage = (messageId: string, newContent: string) => {
-    if (!selectedContact) return;
     setMessages((prev) =>
       prev.map((m) => (m.id === messageId ? { ...m, content: newContent, isEdited: true, editedAt: Date.now() } : m))
     );
-    client?.sendEdit(selectedContact.uid, messageId, newContent);
+    if (selectedContact) {
+      client?.sendEdit(selectedContact.uid, messageId, newContent);
+    }
   };
 
   const handleDeleteMessage = (messageId: string) => {
-    if (!selectedContact) return;
     setMessages((prev) =>
       prev.map((m) =>
         m.id === messageId ? { ...m, isDeleted: true, content: 'This message was deleted' } : m
       )
     );
-    client?.sendDelete(selectedContact.uid, messageId);
+    if (selectedContact) {
+      client?.sendDelete(selectedContact.uid, messageId);
+    }
   };
 
   const handlePinMessage = (messageId: string) => {
@@ -237,7 +357,8 @@ export const App: React.FC = () => {
   };
 
   const handleRetryMessage = (messageId: string) => {
-    if (!selectedContact) return;
+    const targetId = selectedGroup ? selectedGroup.id : selectedContact?.uid;
+    if (!targetId) return;
     const msg = messages.find((m) => m.id === messageId);
     if (!msg) return;
 
@@ -245,13 +366,14 @@ export const App: React.FC = () => {
       prev.map((m) => (m.id === messageId ? { ...m, status: 'pending', timestamp: Date.now() } : m))
     );
 
-    if (client) {
+    if (client && selectedContact) {
       client.sendMessage(selectedContact.uid, msg.content, msg.replyToId);
     }
   };
 
   const handleDropFiles = async (fileList: FileList) => {
-    if (!selectedContact) return;
+    const targetId = selectedGroup ? selectedGroup.id : selectedContact?.uid;
+    if (!targetId) return;
 
     for (let i = 0; i < fileList.length; i++) {
       const file = fileList[i];
@@ -271,7 +393,7 @@ export const App: React.FC = () => {
         transferredBytes: 0,
         direction: 'outgoing',
         senderId: currentUserId,
-        receiverId: selectedContact.uid,
+        receiverId: targetId,
         status: 'transferring',
         speedBps: 25 * 1024 * 1024, // 25 MB/s LAN average
         etaSeconds: Math.ceil(file.size / (25 * 1024 * 1024)),
@@ -299,11 +421,13 @@ export const App: React.FC = () => {
           const fileMsg: Message = {
             id: generateUUID(),
             senderId: currentUserId,
-            receiverId: selectedContact.uid,
-            conversationId: [currentUserId, selectedContact.uid].sort().join('_'),
-            conversationType: 'direct',
+            receiverId: targetId,
+            conversationId: selectedGroup
+              ? selectedGroup.id
+              : [currentUserId, selectedContact!.uid].sort().join('_'),
+            conversationType: selectedGroup ? 'group' : 'direct',
             type: 'file',
-            content: `Sent file: ${safeName}`,
+            content: `Shared file: ${safeName}`,
             timestamp: Date.now(),
             status: 'sent',
             reactions: {},
@@ -350,8 +474,8 @@ export const App: React.FC = () => {
   };
 
   const handleInitiateCall = (type: 'voice' | 'video') => {
-    if (!selectedContact) return;
-    alert(`Initiating ${type} call with ${selectedContact.username} over WebRTC (Phase 8 feature)`);
+    const title = selectedGroup ? selectedGroup.name : selectedContact?.username;
+    alert(`Initiating ${type} call with ${title} over WebRTC (Phase 8 feature)`);
   };
 
   const handleSendFile = () => {
@@ -371,13 +495,18 @@ export const App: React.FC = () => {
     timestamp: Date.now(),
   });
 
-  // Filter messages for active chat
+  // Filter messages for active chat (either active contact or active group)
   const activeConversationMessages = messages.filter((m) => {
-    if (!selectedContact) return false;
-    return (
-      (m.senderId === currentUserId && m.receiverId === selectedContact.uid) ||
-      (m.senderId === selectedContact.uid && m.receiverId === currentUserId)
-    );
+    if (selectedGroup) {
+      return m.conversationId === selectedGroup.id;
+    }
+    if (selectedContact) {
+      return (
+        (m.senderId === currentUserId && m.receiverId === selectedContact.uid) ||
+        (m.senderId === selectedContact.uid && m.receiverId === currentUserId)
+      );
+    }
+    return false;
   });
 
   return (
@@ -391,18 +520,23 @@ export const App: React.FC = () => {
         onToggleTheme={toggleTheme}
       />
 
-      {/* 2. Middle Column: Conversations & LAN Contacts */}
+      {/* 2. Middle Column: Conversations, Groups & LAN Contacts */}
       <ConversationList
         contacts={contacts}
+        groups={groups}
         messages={messages}
         selectedContactId={selectedContact?.uid || null}
-        onSelectContact={(c) => setSelectedContact(c)}
+        selectedGroupId={selectedGroup?.id || null}
+        onSelectContact={handleSelectContact}
+        onSelectGroup={handleSelectGroup}
         onOpenPairing={() => setIsPairingOpen(true)}
+        onOpenCreateGroup={() => setIsCreateGroupOpen(true)}
       />
 
       {/* 3. Right Column: Active Chat Stream */}
       <ChatWindow
         contact={selectedContact}
+        group={selectedGroup}
         currentUserId={currentUserId}
         messages={activeConversationMessages}
         activeTransfers={activeTransfers}
@@ -428,6 +562,14 @@ export const App: React.FC = () => {
         myToken={myToken}
         qrPayload={qrPayload}
         onPairWithToken={handlePairWithToken}
+      />
+
+      {/* Create Group Modal */}
+      <CreateGroupModal
+        isOpen={isCreateGroupOpen}
+        onClose={() => setIsCreateGroupOpen(false)}
+        contacts={contacts}
+        onCreateGroup={handleCreateGroup}
       />
 
       {/* Incoming File Transfer Approval Modal */}

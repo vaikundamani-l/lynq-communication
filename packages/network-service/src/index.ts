@@ -3,4 +3,5 @@ export * from './discovery/MdnsDiscovery.js';
 export * from './pairing/PairingManager.js';
 export * from './signaling/SignalingServer.js';
 export * from './queue/MessageQueueManager.js';
+export * from './group/GroupManager.js';
 export * from './daemon.js';

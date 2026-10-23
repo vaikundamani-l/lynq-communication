@@ -94,4 +94,43 @@ export class GroupRepository {
   public removeMember(groupId: string, userId: string): void {
     this.db.prepare('DELETE FROM group_members WHERE group_id = ? AND user_id = ?').run(groupId, userId);
   }
+
+  public updateMemberRole(groupId: string, userId: string, role: 'admin' | 'member'): void {
+    this.db.prepare('UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?').run(role, groupId, userId);
+  }
+
+  public updateGroupInfo(groupId: string, name: string, description?: string): void {
+    this.db.prepare('UPDATE groups SET name = ?, description = ?, updated_at = ? WHERE id = ?').run(
+      name,
+      description || null,
+      Date.now(),
+      groupId
+    );
+  }
+
+  public pinGroupMessage(groupId: string, messageId: string, pin: boolean): void {
+    const group = this.getGroup(groupId);
+    if (!group) return;
+
+    let pins = group.pinnedMessageIds || [];
+    if (pin && !pins.includes(messageId)) {
+      pins.push(messageId);
+    } else if (!pin) {
+      pins = pins.filter((id) => id !== messageId);
+    }
+
+    this.db.prepare('UPDATE groups SET pinned_message_ids = ?, updated_at = ? WHERE id = ?').run(
+      JSON.stringify(pins),
+      Date.now(),
+      groupId
+    );
+  }
+
+  public deleteGroup(groupId: string): void {
+    const transaction = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM group_members WHERE group_id = ?').run(groupId);
+      this.db.prepare('DELETE FROM groups WHERE id = ?').run(groupId);
+    });
+    transaction();
+  }
 }

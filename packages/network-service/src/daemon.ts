@@ -21,6 +21,7 @@ import { MdnsDiscovery } from './discovery/MdnsDiscovery.js';
 import { SignalingServer } from './signaling/SignalingServer.js';
 import { PairingManager } from './pairing/PairingManager.js';
 import { MessageQueueManager } from './queue/MessageQueueManager.js';
+import { GroupManager } from './group/GroupManager.js';
 
 export interface DaemonConfig {
   dataDir?: string;
@@ -51,6 +52,7 @@ export class LynqDaemon extends EventEmitter {
   public mdnsDiscovery: MdnsDiscovery;
   public pairingManager: PairingManager;
   public queueManager: MessageQueueManager;
+  public groupManager: GroupManager;
 
   public profile: NodeProfile;
   private isRunning = false;
@@ -136,6 +138,15 @@ export class LynqDaemon extends EventEmitter {
     this.queueManager = new MessageQueueManager(this.messageRepo, this.signalingServer, {
       senderId: uid,
     });
+
+    this.groupManager = new GroupManager(
+      uid,
+      username,
+      this.groupRepo,
+      this.messageRepo,
+      this.queueManager,
+      this.signalingServer
+    );
 
     this.setupEventWiring();
   }
