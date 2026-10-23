@@ -22,6 +22,10 @@ export class DatabaseManager {
     return this.db;
   }
 
+  public isOpen(): boolean {
+    return Boolean(this.db && this.db.open);
+  }
+
   public close(): void {
     if (this.db && this.db.open) {
       this.db.close();
