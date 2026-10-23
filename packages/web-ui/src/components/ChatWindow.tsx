@@ -3,6 +3,7 @@ import { Contact, Message, FileTransfer, Group } from '@lynq/core';
 import { FileTransferItem } from './FileTransferItem';
 import { VoiceMessageBubble } from './VoiceMessageBubble';
 import { VoiceRecorderService, RecordedVoiceData } from '../services/VoiceRecorderService';
+import { MediaGalleryModal } from './MediaGalleryModal';
 
 interface ChatWindowProps {
   contact: Contact | null;
@@ -18,6 +19,7 @@ interface ChatWindowProps {
   onEditMessage: (messageId: string, newContent: string) => void;
   onDeleteMessage: (messageId: string) => void;
   onPinMessage: (messageId: string) => void;
+  onForwardMessage?: (message: Message) => void;
   onRetryMessage?: (messageId: string) => void;
   onCancelTransfer?: (transferId: string) => void;
   onDropFiles?: (files: FileList) => void;
@@ -42,6 +44,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onEditMessage,
   onDeleteMessage,
   onPinMessage,
+  onForwardMessage,
   onRetryMessage,
   onCancelTransfer,
   onDropFiles,
@@ -56,6 +59,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [showMembersDrawer, setShowMembersDrawer] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [chatSearchText, setChatSearchText] = useState('');
+  const [showGallery, setShowGallery] = useState(false);
 
   // Voice recording state
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
@@ -292,6 +298,23 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               👥 Members ({group.members.length})
             </button>
           )}
+          <button
+            className={`action-btn ${showSearch ? 'active' : ''}`}
+            title="Search in conversation"
+            onClick={() => {
+              setShowSearch((prev) => !prev);
+              if (showSearch) setChatSearchText('');
+            }}
+          >
+            🔍
+          </button>
+          <button
+            className="action-btn"
+            title="Media & Files Gallery"
+            onClick={() => setShowGallery(true)}
+          >
+            🖼️
+          </button>
           <button className="action-btn" title="Voice Call" onClick={() => onInitiateCall('voice')}>
             📞
           </button>
@@ -303,6 +326,52 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </button>
         </div>
       </header>
+
+      {/* In-Chat Search Bar */}
+      {showSearch && (
+        <div
+          style={{
+            background: 'var(--bg-active)',
+            borderBottom: '1px solid var(--border-subtle)',
+            padding: '8px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+          }}
+        >
+          <span>🔍</span>
+          <input
+            type="text"
+            placeholder="Search text in this chat..."
+            value={chatSearchText}
+            onChange={(e) => setChatSearchText(e.target.value)}
+            style={{
+              flex: 1,
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '6px',
+              padding: '6px 10px',
+              color: 'var(--text-primary)',
+              fontSize: '13px',
+            }}
+            autoFocus
+          />
+          {chatSearchText && (
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+              {messages.filter((m) => m.content.toLowerCase().includes(chatSearchText.toLowerCase())).length} found
+            </span>
+          )}
+          <button
+            onClick={() => {
+              setShowSearch(false);
+              setChatSearchText('');
+            }}
+            style={{ background: 'none', border: 'none', color: 'gray', cursor: 'pointer', fontSize: '14px' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Pinned Message Banner */}
       {pinnedMessage && (
@@ -369,7 +438,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       {/* Message Stream */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <div className="messages-container" style={{ flex: 1 }}>
-          {messages.map((msg) => {
+          {(chatSearchText
+            ? messages.filter((m) => m.content.toLowerCase().includes(chatSearchText.toLowerCase()))
+            : messages
+          ).map((msg) => {
             if (msg.type === 'system') {
               return (
                 <div key={msg.id} style={{ display: 'flex', justifyContent: 'center', margin: '6px 0' }}>
@@ -433,6 +505,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                     title="Reply"
                   >
                     ↩️
+                  </button>
+                  <button
+                    onClick={() => onForwardMessage?.(msg)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px' }}
+                    title="Forward"
+                  >
+                    ➡️
                   </button>
                   <button
                     onClick={() => onPinMessage(msg.id)}
@@ -733,6 +812,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </>
         )}
       </footer>
+
+      {/* Media & Documents Gallery Modal */}
+      <MediaGalleryModal
+        isOpen={showGallery}
+        onClose={() => setShowGallery(false)}
+        title={title}
+        messages={messages}
+      />
     </main>
   );
 };

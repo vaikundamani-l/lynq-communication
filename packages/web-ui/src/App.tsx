@@ -18,6 +18,9 @@ import { PairingModal } from './components/PairingModal';
 import { FileTransferModal } from './components/FileTransferModal';
 import { CreateGroupModal } from './components/CreateGroupModal';
 import { CallModal } from './components/CallModal';
+import { ForwardModal } from './components/ForwardModal';
+import { SettingsModal } from './components/SettingsModal';
+import { DiagnosticsModal } from './components/DiagnosticsModal';
 import { NotificationService } from './services/NotificationService';
 import { RecordedVoiceData } from './services/VoiceRecorderService';
 import './styles/theme.css';
@@ -26,10 +29,14 @@ export const App: React.FC = () => {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [activeTab, setActiveTab] = useState<NavTab>('chats');
   const [currentUserId] = useState(() => 'user_' + generateUUID().slice(0, 8));
-  const [username] = useState('LocalHost');
+  const [username, setUsername] = useState('LocalHost');
+  const [downloadPath, setDownloadPath] = useState('/home/shadow-khan/Downloads/LYNQ');
   const [myToken] = useState(() => generatePairingToken());
   const [isPairingOpen, setIsPairingOpen] = useState(false);
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
+  const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
   const [networkStatus, setNetworkStatus] = useState({ connected: false, url: 'ws://127.0.0.1:4848' });
   const [isPeerTyping, setIsPeerTyping] = useState(false);
   const [activeTransfers, setActiveTransfers] = useState<FileTransfer[]>([]);
@@ -257,6 +264,50 @@ export const App: React.FC = () => {
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(nextTheme);
     document.documentElement.setAttribute('data-theme', nextTheme);
+  };
+
+  const handleTabChange = (tab: NavTab) => {
+    setActiveTab(tab);
+    if (tab === 'pairing') {
+      setIsPairingOpen(true);
+    } else if (tab === 'settings') {
+      setIsSettingsOpen(true);
+    } else if (tab === 'diagnostics') {
+      setIsDiagnosticsOpen(true);
+    }
+  };
+
+  const handleForwardMessage = (targetId: string, isGroup: boolean, content: string) => {
+    const forwardMsg: Message = {
+      id: generateUUID(),
+      senderId: currentUserId,
+      receiverId: targetId,
+      conversationId: isGroup ? targetId : [currentUserId, targetId].sort().join('_'),
+      conversationType: isGroup ? 'group' : 'direct',
+      type: 'text',
+      content: `[Forwarded] ${content}`,
+      timestamp: Date.now(),
+      status: client ? 'sent' : 'pending',
+      reactions: {},
+      isEdited: false,
+      isDeleted: false,
+      isPinned: false,
+    };
+
+    setMessages((prev) => [...prev, forwardMsg]);
+
+    if (client) {
+      if (isGroup) {
+        const grp = groups.find((g) => g.id === targetId);
+        grp?.members.forEach((m) => {
+          if (m.userId !== currentUserId) {
+            client.sendMessage(m.userId, forwardMsg.content);
+          }
+        });
+      } else {
+        client.sendMessage(targetId, forwardMsg.content);
+      }
+    }
   };
 
   const handleSelectContact = (contact: Contact) => {
@@ -659,7 +710,7 @@ export const App: React.FC = () => {
       {/* 1. Left Nav Rail */}
       <SidebarRail
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
         username={username}
         theme={theme}
         onToggleTheme={toggleTheme}
@@ -693,12 +744,43 @@ export const App: React.FC = () => {
         onEditMessage={handleEditMessage}
         onDeleteMessage={handleDeleteMessage}
         onPinMessage={handlePinMessage}
+        onForwardMessage={(msg) => setForwardingMessage(msg)}
         onRetryMessage={handleRetryMessage}
         onCancelTransfer={handleCancelTransfer}
         onDropFiles={handleDropFiles}
         onInitiateCall={handleInitiateCall}
         onSendFile={handleSendFile}
         networkStatus={networkStatus}
+      />
+
+      {/* Forward Message Modal */}
+      <ForwardModal
+        message={forwardingMessage}
+        contacts={contacts}
+        groups={groups}
+        currentUserId={currentUserId}
+        onForward={handleForwardMessage}
+        onClose={() => setForwardingMessage(null)}
+      />
+
+      {/* Settings & Storage Disclosure Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        username={username}
+        onUpdateUsername={setUsername}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        downloadPath={downloadPath}
+        onUpdateDownloadPath={setDownloadPath}
+      />
+
+      {/* Connection Troubleshooting & Diagnostics Modal */}
+      <DiagnosticsModal
+        isOpen={isDiagnosticsOpen}
+        onClose={() => setIsDiagnosticsOpen(false)}
+        networkStatus={networkStatus}
+        contacts={contacts}
       />
 
       {/* Pairing Modal with QR code */}
