@@ -12,6 +12,7 @@ interface ChatWindowProps {
   onEditMessage: (messageId: string, newContent: string) => void;
   onDeleteMessage: (messageId: string) => void;
   onPinMessage: (messageId: string) => void;
+  onRetryMessage?: (messageId: string) => void;
   onInitiateCall: (type: 'voice' | 'video') => void;
   onSendFile: () => void;
   networkStatus: { connected: boolean; url: string };
@@ -30,6 +31,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onEditMessage,
   onDeleteMessage,
   onPinMessage,
+  onRetryMessage,
   onInitiateCall,
   onSendFile,
   networkStatus,
@@ -98,13 +100,23 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
     switch (msg.status) {
       case 'pending':
-        return <span className="message-ticks" title="Pending">⏱️</span>;
+        return <span className="message-ticks" title="Queued in Outbox (waiting for peer connection)">⏱️</span>;
       case 'sent':
-        return <span className="message-ticks" title="Sent">✓</span>;
+        return <span className="message-ticks" title="Sent over network">✓</span>;
       case 'delivered':
-        return <span className="message-ticks" title="Delivered">✓✓</span>;
+        return <span className="message-ticks" title="Delivered to device">✓✓</span>;
       case 'read':
-        return <span className="message-ticks read" title="Read">✓✓</span>;
+        return <span className="message-ticks read" title="Read by recipient">✓✓</span>;
+      case 'failed':
+        return (
+          <span
+            onClick={() => onRetryMessage?.(msg.id)}
+            style={{ color: 'var(--accent-danger)', cursor: 'pointer', fontSize: '11px', fontWeight: 700 }}
+            title="Transmission failed. Click to retry."
+          >
+            ⚠️ Failed (Retry)
+          </span>
+        );
       default:
         return null;
     }
@@ -188,7 +200,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       <div className="diagnostics-banner">
         <span>⚡ Direct Local Connection</span>
         <div className="diagnostics-tags">
-          <span className="tag-badge">Signaling: {networkStatus.connected ? 'Active' : 'Offline'}</span>
+          <span
+            className="tag-badge"
+            style={{ color: networkStatus.connected ? 'var(--status-online)' : 'var(--accent-warning)' }}
+          >
+            {networkStatus.connected ? 'Signaling: Connected' : 'Signaling: Reconnecting...'}
+          </span>
           <span className="tag-badge">Transport: WebRTC DataChannel Ready</span>
           <span className="tag-badge">{contact.isPaired ? '🔒 Authenticated' : '⚠️ Unpaired'}</span>
         </div>

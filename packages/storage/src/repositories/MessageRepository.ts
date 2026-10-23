@@ -135,6 +135,34 @@ export class MessageRepository {
     return rows.map((r) => this.mapRowToMessage(r));
   }
 
+  public getPendingOutgoingMessages(recipientId?: string): Message[] {
+    let sql = "SELECT * FROM messages WHERE status = 'pending' AND is_deleted = 0";
+    const params: unknown[] = [];
+
+    if (recipientId) {
+      sql += ' AND receiver_id = ?';
+      params.push(recipientId);
+    }
+
+    sql += ' ORDER BY timestamp ASC';
+    const rows = this.db.prepare(sql).all(...params) as MessageRow[];
+    return rows.map((r) => this.mapRowToMessage(r));
+  }
+
+  public markFailedMessages(maxAgeMs: number = 60000): number {
+    const threshold = Date.now() - maxAgeMs;
+    const result = this.db.prepare(`
+      UPDATE messages 
+      SET status = 'failed' 
+      WHERE status = 'pending' AND timestamp < ?
+    `).run(threshold);
+    return result.changes;
+  }
+
+  public retryFailedMessage(id: string): void {
+    this.db.prepare("UPDATE messages SET status = 'pending', timestamp = ? WHERE id = ?").run(Date.now(), id);
+  }
+
   public getUnreadCount(conversationId: string, currentUserId: string): number {
     const row = this.db.prepare(`
       SELECT COUNT(*) as count 

@@ -243,6 +243,20 @@ export const App: React.FC = () => {
     alert(`Selecting file for direct P2P transfer with ${selectedContact.username} (Phase 5 feature)`);
   };
 
+  const handleRetryMessage = (messageId: string) => {
+    if (!selectedContact) return;
+    const msg = messages.find((m) => m.id === messageId);
+    if (!msg) return;
+
+    setMessages((prev) =>
+      prev.map((m) => (m.id === messageId ? { ...m, status: 'pending', timestamp: Date.now() } : m))
+    );
+
+    if (client) {
+      client.sendMessage(selectedContact.uid, msg.content, msg.replyToId);
+    }
+  };
+
   const handlePairWithToken = (token: string) => {
     alert(`Pairing token "${token}" submitted to local networking service!`);
   };
@@ -297,6 +311,7 @@ export const App: React.FC = () => {
         onEditMessage={handleEditMessage}
         onDeleteMessage={handleDeleteMessage}
         onPinMessage={handlePinMessage}
+        onRetryMessage={handleRetryMessage}
         onInitiateCall={handleInitiateCall}
         onSendFile={handleSendFile}
         networkStatus={networkStatus}

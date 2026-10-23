@@ -20,6 +20,7 @@ import { UdpDiscovery } from './discovery/UdpDiscovery.js';
 import { MdnsDiscovery } from './discovery/MdnsDiscovery.js';
 import { SignalingServer } from './signaling/SignalingServer.js';
 import { PairingManager } from './pairing/PairingManager.js';
+import { MessageQueueManager } from './queue/MessageQueueManager.js';
 
 export interface DaemonConfig {
   dataDir?: string;
@@ -49,6 +50,7 @@ export class LynqDaemon extends EventEmitter {
   public udpDiscovery: UdpDiscovery;
   public mdnsDiscovery: MdnsDiscovery;
   public pairingManager: PairingManager;
+  public queueManager: MessageQueueManager;
 
   public profile: NodeProfile;
   private isRunning = false;
@@ -131,6 +133,10 @@ export class LynqDaemon extends EventEmitter {
       this.contactRepo
     );
 
+    this.queueManager = new MessageQueueManager(this.messageRepo, this.signalingServer, {
+      senderId: uid,
+    });
+
     this.setupEventWiring();
   }
 
@@ -177,6 +183,7 @@ export class LynqDaemon extends EventEmitter {
     this.signalingServer.on('clientConnected', (clientUid: string) => {
       if (this.isRunning && this.dbManager.isOpen()) {
         this.contactRepo.updatePresence(clientUid, 'online');
+        this.queueManager.drainOutboxForPeer(clientUid);
       }
       this.emit('peerConnected', clientUid);
     });
@@ -279,6 +286,7 @@ export class LynqDaemon extends EventEmitter {
     }
 
     this.isRunning = true;
+    this.queueManager.start();
     this.emit('started', this.profile);
   }
 
@@ -286,6 +294,7 @@ export class LynqDaemon extends EventEmitter {
     if (!this.isRunning) return;
 
     this.isRunning = false;
+    this.queueManager.stop();
     this.udpDiscovery.stop();
     this.mdnsDiscovery.stop();
     await this.signalingServer.stop();
@@ -295,7 +304,7 @@ export class LynqDaemon extends EventEmitter {
   }
 
   /**
-   * Send a text message to a contact or group
+   * Send a text message to a contact or group using the store-and-forward outbox
    */
   public async sendMessage(
     recipientId: string,
@@ -323,25 +332,8 @@ export class LynqDaemon extends EventEmitter {
       isPinned: false,
     };
 
-    // Save locally
-    this.messageRepo.saveMessage(message);
-
-    // Route over signaling
-    const envelope: SignalingEnvelope<Message> = {
-      id: generateUUID(),
-      type: 'msg:send',
-      senderId: this.profile.uid,
-      recipientId,
-      timestamp: Date.now(),
-      payload: message,
-    };
-
-    const sent = this.signalingServer.sendToClient(recipientId, envelope);
-    if (sent) {
-      message.status = 'sent';
-      this.messageRepo.updateMessageStatus(message.id, 'sent');
-    }
-
+    // Enqueue message into store-and-forward outbox
+    this.queueManager.enqueue(message);
     return message;
   }
 }
