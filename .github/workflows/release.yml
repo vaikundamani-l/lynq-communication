@@ -1,0 +1,64 @@
+name: Release Desktop Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release-tauri:
+    name: Build Tauri (${{ matrix.platform }})
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-22.04, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build web assets and services
+        run: npm run build
+
+      - name: Build Tauri Desktop Package
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'LYNQ Communication ${{ github.ref_name }}'
+          releaseBody: |
+            ## LYNQ Communication ${{ github.ref_name }}
+            
+            Open-source, local-first cross-platform communication and high-speed media transfer platform.
+            
+            ### Included in this release:
+            - Instant 1-to-1 and private group conversations
+            - Direct peer-to-peer 64KB chunked file sharing with SHA-256 verification
+            - Voice messages with waveform playback
+            - 1-to-1 WebRTC voice and video calling
+            - Zero-config mDNS and UDP LAN discovery
+            - Offline SQLite persistence with WAL journaling
+            
+            No external server, cloud account, or development tools required!
+          releaseDraft: false
+          prerelease: false
