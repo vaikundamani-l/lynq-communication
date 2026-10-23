@@ -1,4 +1,4 @@
-import { EventEmitter } from 'node:events';
+import { EventEmitter } from './EventEmitter.js';
 import {
   FileTransfer,
   FileChunk,

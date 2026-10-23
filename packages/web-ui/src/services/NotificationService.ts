@@ -124,6 +124,21 @@ export class NotificationService {
     }
   }
 
+  public showCallNotification(callerName: string, type: 'voice' | 'video' = 'voice'): void {
+    this.playChime('call');
+
+    if (this.hasPermission && document.hidden) {
+      try {
+        new Notification(`LYNQ: Incoming ${type === 'video' ? 'Video' : 'Voice'} Call`, {
+          body: `${callerName} is calling you...`,
+          icon: '/favicon.ico',
+        });
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   public updateUnreadBadge(count: number): void {
     if (typeof document === 'undefined') return;
     if (count > 0) {

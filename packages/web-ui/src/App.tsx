@@ -4,10 +4,12 @@ import {
   Message,
   FileTransfer,
   Group,
+  CallSession,
   generateUUID,
   generatePairingToken,
   sanitizeFilename,
 } from '@lynq/core';
+import { CallSessionEngine } from '@lynq/p2p-engine';
 import { LynqClient } from './services/LynqClient';
 import { SidebarRail, NavTab } from './components/SidebarRail';
 import { ConversationList } from './components/ConversationList';
@@ -15,6 +17,7 @@ import { ChatWindow } from './components/ChatWindow';
 import { PairingModal } from './components/PairingModal';
 import { FileTransferModal } from './components/FileTransferModal';
 import { CreateGroupModal } from './components/CreateGroupModal';
+import { CallModal } from './components/CallModal';
 import { NotificationService } from './services/NotificationService';
 import { RecordedVoiceData } from './services/VoiceRecorderService';
 import './styles/theme.css';
@@ -31,6 +34,8 @@ export const App: React.FC = () => {
   const [isPeerTyping, setIsPeerTyping] = useState(false);
   const [activeTransfers, setActiveTransfers] = useState<FileTransfer[]>([]);
   const [incomingTransfer, setIncomingTransfer] = useState<FileTransfer | null>(null);
+  const [callSession, setCallSession] = useState<CallSession | null>(null);
+  const [callEngine, setCallEngine] = useState<CallSessionEngine | null>(null);
   const [notificationService] = useState(() => new NotificationService());
 
   // Initial contacts
@@ -129,9 +134,53 @@ export const App: React.FC = () => {
     const lynqClient = new LynqClient(currentUserId);
     lynqClient.connect();
 
+    const engine = new CallSessionEngine(currentUserId, username, {
+      sendSignaling: (env) => lynqClient.sendEnvelope(env),
+    });
+
+    engine.on('callUpdated', (session: CallSession) => {
+      setCallSession({ ...session });
+    });
+
+    engine.on('callEnded', (session: CallSession) => {
+      setCallSession(null);
+      const dur =
+        session.durationSeconds > 0
+          ? `Duration: ${Math.floor(session.durationSeconds / 60)}m ${session.durationSeconds % 60}s`
+          : 'Call ended';
+      const targetId = session.callerId === currentUserId ? session.calleeId : session.callerId;
+      const callMsg: Message = {
+        id: generateUUID(),
+        senderId: currentUserId,
+        receiverId: targetId,
+        conversationId: [currentUserId, targetId].sort().join('_'),
+        conversationType: 'direct',
+        type: 'system',
+        content: `📞 ${session.type === 'video' ? 'Video' : 'Voice'} call ended (${session.endReason || 'completed'}). ${dur}`,
+        timestamp: Date.now(),
+        status: 'sent',
+        reactions: {},
+        isEdited: false,
+        isDeleted: false,
+        isPinned: false,
+      };
+      setMessages((prev) => [...prev, callMsg]);
+    });
+
+    setCallEngine(engine);
+
     const unsubscribe = lynqClient.subscribe((event) => {
       if (event.type === 'status') {
         setNetworkStatus(event.payload);
+      } else if (event.type === 'signaling') {
+        const env = event.payload;
+        if (env.type.startsWith('call:')) {
+          engine.handleSignalingEnvelope(env);
+          if (env.type === 'call:invite') {
+            const invite = env.payload as CallSession;
+            notificationService.showCallNotification(invite.callerName || 'Unknown Peer', invite.type);
+          }
+        }
       } else if (event.type === 'message') {
         const newMsg = event.payload;
         setMessages((prev) => {
@@ -197,6 +246,10 @@ export const App: React.FC = () => {
     return () => {
       unsubscribe();
       lynqClient.disconnect();
+      engine.removeAllListeners();
+      if (engine.currentCall) {
+        engine.hangup('unmounted');
+      }
     };
   }, [currentUserId, selectedContact]);
 
@@ -527,9 +580,47 @@ export const App: React.FC = () => {
     setIncomingTransfer(null);
   };
 
-  const handleInitiateCall = (type: 'voice' | 'video') => {
-    const title = selectedGroup ? selectedGroup.name : selectedContact?.username;
-    alert(`Initiating ${type} call with ${title} over WebRTC (Phase 8 feature)`);
+  const handleInitiateCall = async (type: 'voice' | 'video') => {
+    if (selectedGroup) {
+      alert('Group calling is scheduled for a future phase. 1-to-1 Voice & Video calling is active!');
+      return;
+    }
+    if (!selectedContact) {
+      alert('Please select a contact to call.');
+      return;
+    }
+    if (!callEngine) return;
+    try {
+      await callEngine.initiateCall(selectedContact.uid, selectedContact.username, type);
+    } catch (err: any) {
+      alert(`Could not initiate call: ${err?.message || err}`);
+    }
+  };
+
+  const handleAcceptCall = async () => {
+    try {
+      await callEngine?.acceptCall();
+    } catch (err: any) {
+      alert(`Could not accept call: ${err?.message || err}`);
+    }
+  };
+
+  const handleRejectCall = () => {
+    callEngine?.rejectCall('declined');
+    setCallSession(null);
+  };
+
+  const handleHangup = () => {
+    callEngine?.hangup('ended');
+    setCallSession(null);
+  };
+
+  const handleToggleMute = () => {
+    callEngine?.toggleMute();
+  };
+
+  const handleToggleVideo = () => {
+    callEngine?.toggleVideo();
   };
 
   const handleSendFile = () => {
@@ -632,6 +723,16 @@ export const App: React.FC = () => {
         incomingTransfer={incomingTransfer}
         onAccept={handleAcceptIncomingTransfer}
         onReject={handleRejectIncomingTransfer}
+      />
+
+      {/* 1-to-1 Voice & Video WebRTC Call Modal */}
+      <CallModal
+        callSession={callSession}
+        onAccept={handleAcceptCall}
+        onReject={handleRejectCall}
+        onHangup={handleHangup}
+        onToggleMute={handleToggleMute}
+        onToggleVideo={handleToggleVideo}
       />
     </div>
   );

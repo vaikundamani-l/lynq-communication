@@ -14,7 +14,8 @@ export type LynqClientEvent =
   | { type: 'edit'; payload: { messageId: string; content: string; editedAt: number } }
   | { type: 'delete'; payload: { messageId: string } }
   | { type: 'contact'; payload: Contact }
-  | { type: 'status'; payload: { connected: boolean; url: string } };
+  | { type: 'status'; payload: { connected: boolean; url: string } }
+  | { type: 'signaling'; payload: SignalingEnvelope };
 
 export class LynqClient {
   private ws: WebSocket | null = null;
@@ -53,6 +54,7 @@ export class LynqClient {
       this.ws.onmessage = (event) => {
         try {
           const envelope: SignalingEnvelope = JSON.parse(event.data);
+          this.emit({ type: 'signaling', payload: envelope });
           switch (envelope.type) {
             case 'msg:send':
               this.emit({ type: 'message', payload: envelope.payload as Message });
