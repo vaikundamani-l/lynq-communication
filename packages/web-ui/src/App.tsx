@@ -15,6 +15,8 @@ import { ChatWindow } from './components/ChatWindow';
 import { PairingModal } from './components/PairingModal';
 import { FileTransferModal } from './components/FileTransferModal';
 import { CreateGroupModal } from './components/CreateGroupModal';
+import { NotificationService } from './services/NotificationService';
+import { RecordedVoiceData } from './services/VoiceRecorderService';
 import './styles/theme.css';
 
 export const App: React.FC = () => {
@@ -29,6 +31,7 @@ export const App: React.FC = () => {
   const [isPeerTyping, setIsPeerTyping] = useState(false);
   const [activeTransfers, setActiveTransfers] = useState<FileTransfer[]>([]);
   const [incomingTransfer, setIncomingTransfer] = useState<FileTransfer | null>(null);
+  const [notificationService] = useState(() => new NotificationService());
 
   // Initial contacts
   const [contacts, setContacts] = useState<Contact[]>([
@@ -133,6 +136,9 @@ export const App: React.FC = () => {
         const newMsg = event.payload;
         setMessages((prev) => {
           if (prev.some((m) => m.id === newMsg.id)) return prev;
+          if (newMsg.senderId !== currentUserId) {
+            notificationService.showMessageNotification(newMsg.senderId, newMsg.content);
+          }
           return [...prev, newMsg];
         });
 
@@ -293,6 +299,54 @@ export const App: React.FC = () => {
         }
       } else {
         client.sendMessage(selectedContact!.uid, content, replyToId);
+      }
+    }
+  };
+
+  const handleSendVoiceMessage = (voiceData: RecordedVoiceData) => {
+    const targetRecipientId = selectedGroup ? selectedGroup.id : selectedContact?.uid;
+    if (!targetRecipientId) return;
+
+    const convId = selectedGroup
+      ? selectedGroup.id
+      : [currentUserId, selectedContact!.uid].sort().join('_');
+    const convType = selectedGroup ? 'group' : 'direct';
+
+    const voiceMsg: Message = {
+      id: generateUUID(),
+      senderId: currentUserId,
+      receiverId: targetRecipientId,
+      conversationId: convId,
+      conversationType: convType,
+      type: 'voice',
+      content: 'Voice note',
+      timestamp: Date.now(),
+      status: client ? 'sent' : 'pending',
+      reactions: {},
+      isEdited: false,
+      isDeleted: false,
+      isPinned: false,
+      fileMetadata: {
+        fileId: generateUUID(),
+        fileName: `voice_note_${Date.now()}.webm`,
+        fileSize: voiceData.audioBlob.size,
+        mimeType: voiceData.mimeType,
+        durationSeconds: voiceData.durationSeconds,
+        sha256Hash: 'sha256_voice_note',
+      },
+    };
+
+    setMessages((prev) => [...prev, voiceMsg]);
+
+    if (client) {
+      if (selectedGroup) {
+        for (const member of selectedGroup.members) {
+          if (member.userId !== currentUserId) {
+            client.sendMessage(member.userId, voiceMsg.content);
+          }
+        }
+      } else {
+        client.sendMessage(selectedContact!.uid, voiceMsg.content);
       }
     }
   };
@@ -542,6 +596,7 @@ export const App: React.FC = () => {
         activeTransfers={activeTransfers}
         isPeerTyping={isPeerTyping}
         onSendMessage={handleSendMessage}
+        onSendVoiceMessage={handleSendVoiceMessage}
         onSendTyping={handleSendTyping}
         onReact={handleReact}
         onEditMessage={handleEditMessage}

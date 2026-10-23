@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Contact, Message, FileTransfer, Group } from '@lynq/core';
 import { FileTransferItem } from './FileTransferItem';
+import { VoiceMessageBubble } from './VoiceMessageBubble';
+import { VoiceRecorderService, RecordedVoiceData } from '../services/VoiceRecorderService';
 
 interface ChatWindowProps {
   contact: Contact | null;
@@ -10,6 +12,7 @@ interface ChatWindowProps {
   activeTransfers?: FileTransfer[];
   isPeerTyping: boolean;
   onSendMessage: (content: string, replyToId?: string) => void;
+  onSendVoiceMessage?: (data: RecordedVoiceData) => void;
   onSendTyping: () => void;
   onReact: (messageId: string, emoji: string) => void;
   onEditMessage: (messageId: string, newContent: string) => void;
@@ -33,6 +36,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   activeTransfers = [],
   isPeerTyping,
   onSendMessage,
+  onSendVoiceMessage,
   onSendTyping,
   onReact,
   onEditMessage,
@@ -52,6 +56,54 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [showMembersDrawer, setShowMembersDrawer] = useState(false);
+
+  // Voice recording state
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const voiceRecorderRef = useRef<VoiceRecorderService | null>(null);
+  const recordTimerRef = useRef<any>(null);
+
+  useEffect(() => {
+    voiceRecorderRef.current = new VoiceRecorderService();
+    return () => {
+      if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+      voiceRecorderRef.current?.cancel();
+    };
+  }, []);
+
+  const startVoiceRecord = async () => {
+    if (!voiceRecorderRef.current) return;
+    try {
+      await voiceRecorderRef.current.start();
+      setIsRecordingVoice(true);
+      setRecordSeconds(0);
+      recordTimerRef.current = setInterval(() => {
+        setRecordSeconds((s) => s + 1);
+      }, 1000);
+    } catch (err) {
+      alert('Microphone access denied: ' + String(err));
+    }
+  };
+
+  const stopAndSendVoice = async () => {
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    if (!voiceRecorderRef.current) return;
+    try {
+      const data = await voiceRecorderRef.current.stop();
+      setIsRecordingVoice(false);
+      setRecordSeconds(0);
+      onSendVoiceMessage?.(data);
+    } catch {
+      setIsRecordingVoice(false);
+    }
+  };
+
+  const cancelVoiceRecord = () => {
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    voiceRecorderRef.current?.cancel();
+    setIsRecordingVoice(false);
+    setRecordSeconds(0);
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -439,15 +491,19 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 )}
 
                 {/* Message Content */}
-                <div
-                  className="message-content"
-                  style={{
-                    fontStyle: msg.isDeleted ? 'italic' : 'normal',
-                    opacity: msg.isDeleted ? 0.7 : 1,
-                  }}
-                >
-                  {msg.content}
-                </div>
+                {msg.type === 'voice' ? (
+                  <VoiceMessageBubble message={msg} />
+                ) : (
+                  <div
+                    className="message-content"
+                    style={{
+                      fontStyle: msg.isDeleted ? 'italic' : 'normal',
+                      opacity: msg.isDeleted ? 0.7 : 1,
+                    }}
+                  >
+                    {msg.content}
+                  </div>
+                )}
 
                 {/* Reactions badge display */}
                 {msg.reactions && Object.keys(msg.reactions).length > 0 && (
@@ -616,28 +672,66 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
       {/* Message Composer */}
       <footer className="chat-composer">
-        <button className="action-btn" title="Send File" onClick={handleTriggerFileInput}>
-          📎
-        </button>
+        {isRecordingVoice ? (
+          <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+              <span style={{ fontSize: '14px' }}>🔴</span>
+              <span style={{ color: 'var(--accent)', fontWeight: 600, fontSize: '14px' }}>
+                Recording voice note...
+              </span>
+              <span style={{ fontFamily: 'monospace', fontSize: '13px', color: 'var(--text-muted)' }}>
+                {Math.floor(recordSeconds / 60)}:{(recordSeconds % 60).toString().padStart(2, '0')}
+              </span>
+            </div>
+            <button
+              className="action-btn"
+              onClick={cancelVoiceRecord}
+              title="Cancel Recording"
+              style={{ color: 'var(--accent-danger)' }}
+            >
+              🗑️
+            </button>
+            <button className="send-btn" onClick={stopAndSendVoice} title="Send Voice Note">
+              ➤
+            </button>
+          </div>
+        ) : (
+          <>
+            <button className="action-btn" title="Send File" onClick={handleTriggerFileInput}>
+              📎
+            </button>
 
-        <input
-          type="text"
-          className="composer-input"
-          placeholder={editingMessageId ? 'Edit your message...' : 'Type a message...'}
-          value={editingMessageId ? editText : inputText}
-          onChange={(e) => (editingMessageId ? setEditText(e.target.value) : setInputText(e.target.value))}
-          onKeyDown={handleKeyDown}
-          autoFocus
-        />
+            <input
+              type="text"
+              className="composer-input"
+              placeholder={editingMessageId ? 'Edit your message...' : 'Type a message...'}
+              value={editingMessageId ? editText : inputText}
+              onChange={(e) => (editingMessageId ? setEditText(e.target.value) : setInputText(e.target.value))}
+              onKeyDown={handleKeyDown}
+              autoFocus
+            />
 
-        <button
-          className="send-btn"
-          title="Send"
-          onClick={handleSend}
-          disabled={editingMessageId ? !editText.trim() : !inputText.trim()}
-        >
-          ➤
-        </button>
+            {inputText.trim() || editingMessageId ? (
+              <button
+                className="send-btn"
+                title="Send"
+                onClick={handleSend}
+                disabled={editingMessageId ? !editText.trim() : !inputText.trim()}
+              >
+                ➤
+              </button>
+            ) : (
+              <button
+                className="action-btn"
+                title="Record Voice Message"
+                onClick={startVoiceRecord}
+                style={{ fontSize: '20px' }}
+              >
+                🎙️
+              </button>
+            )}
+          </>
+        )}
       </footer>
     </main>
   );
