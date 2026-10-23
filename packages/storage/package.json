@@ -1,0 +1,21 @@
+{
+  "name": "@lynq/storage",
+  "version": "0.1.0",
+  "description": "Local persistence engine and SQLite repositories for LYNQ Communication",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@lynq/core": "*",
+    "better-sqlite3": "^11.8.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@lynq/core",
+  "version": "0.1.0",
+  "description": "Core data models, protocol definitions, and security utils for LYNQ Communication",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
