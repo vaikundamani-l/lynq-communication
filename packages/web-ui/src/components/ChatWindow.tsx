@@ -25,6 +25,7 @@ interface ChatWindowProps {
   onDropFiles?: (files: FileList) => void;
   onInitiateCall: (type: 'voice' | 'video') => void;
   onSendFile: () => void;
+  onBack?: () => void;
   networkStatus: { connected: boolean; url: string };
 }
 
@@ -50,6 +51,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onDropFiles,
   onInitiateCall,
   onSendFile,
+  onBack,
   networkStatus,
 }) => {
   const [inputText, setInputText] = useState('');
@@ -269,6 +271,15 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       {/* Top Header */}
       <header className="chat-header">
         <div className="chat-header-user">
+          {onBack && (
+            <button
+              className="mobile-back-btn action-btn"
+              onClick={onBack}
+              title="Back to conversation list"
+            >
+              ←
+            </button>
+          )}
           <div className="avatar-wrapper" style={{ width: '40px', height: '40px', minWidth: '40px' }}>
             <div
               className="avatar"

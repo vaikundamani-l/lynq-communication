@@ -705,8 +705,10 @@ export const App: React.FC = () => {
     return false;
   });
 
+  const isChatActive = Boolean(selectedContact || selectedGroup);
+
   return (
-    <div className="app-container" data-theme={theme}>
+    <div className={`app-container ${isChatActive ? 'in-chat' : ''}`} data-theme={theme}>
       {/* 1. Left Nav Rail */}
       <SidebarRail
         activeTab={activeTab}
@@ -750,6 +752,10 @@ export const App: React.FC = () => {
         onDropFiles={handleDropFiles}
         onInitiateCall={handleInitiateCall}
         onSendFile={handleSendFile}
+        onBack={() => {
+          setSelectedContact(null);
+          setSelectedGroup(null);
+        }}
         networkStatus={networkStatus}
       />
 
