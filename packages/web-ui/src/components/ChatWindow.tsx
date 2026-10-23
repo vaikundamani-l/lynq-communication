@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Contact, Message } from '@lynq/core';
+import { Contact, Message, FileTransfer } from '@lynq/core';
+import { FileTransferItem } from './FileTransferItem';
 
 interface ChatWindowProps {
   contact: Contact | null;
   currentUserId: string;
   messages: Message[];
+  activeTransfers?: FileTransfer[];
   isPeerTyping: boolean;
   onSendMessage: (content: string, replyToId?: string) => void;
   onSendTyping: () => void;
@@ -13,6 +15,8 @@ interface ChatWindowProps {
   onDeleteMessage: (messageId: string) => void;
   onPinMessage: (messageId: string) => void;
   onRetryMessage?: (messageId: string) => void;
+  onCancelTransfer?: (transferId: string) => void;
+  onDropFiles?: (files: FileList) => void;
   onInitiateCall: (type: 'voice' | 'video') => void;
   onSendFile: () => void;
   networkStatus: { connected: boolean; url: string };
@@ -24,6 +28,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   contact,
   currentUserId,
   messages,
+  activeTransfers = [],
   isPeerTyping,
   onSendMessage,
   onSendTyping,
@@ -32,6 +37,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onDeleteMessage,
   onPinMessage,
   onRetryMessage,
+  onCancelTransfer,
+  onDropFiles,
   onInitiateCall,
   onSendFile,
   networkStatus,
@@ -41,7 +48,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -130,8 +139,63 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const initial = (contact.username ? contact.username[0] : '?').toUpperCase();
   const pinnedMessage = messages.find((m) => m.isPinned);
 
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      onDropFiles?.(e.target.files);
+    }
+  };
+
+  const handleTriggerFileInput = () => {
+    fileInputRef.current?.click();
+  };
+
   return (
-    <main className="chat-workspace">
+    <main
+      className="chat-workspace"
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDraggingOver(true);
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault();
+        setIsDraggingOver(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setIsDraggingOver(false);
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          onDropFiles?.(e.dataTransfer.files);
+        }
+      }}
+    >
+      <input
+        type="file"
+        ref={fileInputRef}
+        multiple
+        onChange={handleFileInputChange}
+        style={{ display: 'none' }}
+      />
+
+      {/* Drag & Drop Visual Overlay */}
+      {isDraggingOver && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'rgba(0, 168, 132, 0.18)',
+            border: '3px dashed var(--accent)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 50,
+            backdropFilter: 'blur(2px)',
+          }}
+        >
+          <div style={{ textAlign: 'center', color: 'var(--accent)', fontWeight: 700, fontSize: '20px' }}>
+            📁 Drop files here to send directly to {contact.username}
+          </div>
+        </div>
+      )}
       {/* Top Header */}
       <header className="chat-header">
         <div className="chat-header-user">
@@ -161,7 +225,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           <button className="action-btn" title="Video Call" onClick={() => onInitiateCall('video')}>
             📹
           </button>
-          <button className="action-btn" title="Send File" onClick={onSendFile}>
+          <button className="action-btn" title="Send File" onClick={handleTriggerFileInput}>
             📎
           </button>
         </div>
@@ -210,6 +274,22 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           <span className="tag-badge">{contact.isPaired ? '🔒 Authenticated' : '⚠️ Unpaired'}</span>
         </div>
       </div>
+
+      {/* Active File Transfers Queue */}
+      {activeTransfers.length > 0 && (
+        <div style={{ padding: '8px 20px', background: 'var(--bg-card)', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '4px' }}>
+            ACTIVE P2P TRANSFERS ({activeTransfers.length})
+          </div>
+          {activeTransfers.map((t) => (
+            <FileTransferItem
+              key={t.transferId}
+              transfer={t}
+              onCancel={(id) => onCancelTransfer?.(id)}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Message Stream */}
       <div className="messages-container">
@@ -426,7 +506,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
       {/* Message Composer */}
       <footer className="chat-composer">
-        <button className="action-btn" title="Send File" onClick={onSendFile}>
+        <button className="action-btn" title="Send File" onClick={handleTriggerFileInput}>
           📎
         </button>
 

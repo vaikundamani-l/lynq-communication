@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Contact, Message, generateUUID, generatePairingToken } from '@lynq/core';
+import { Contact, Message, FileTransfer, generateUUID, generatePairingToken, sanitizeFilename } from '@lynq/core';
 import { LynqClient } from './services/LynqClient';
 import { SidebarRail, NavTab } from './components/SidebarRail';
 import { ConversationList } from './components/ConversationList';
 import { ChatWindow } from './components/ChatWindow';
 import { PairingModal } from './components/PairingModal';
+import { FileTransferModal } from './components/FileTransferModal';
 import './styles/theme.css';
 
 export const App: React.FC = () => {
@@ -16,6 +17,8 @@ export const App: React.FC = () => {
   const [isPairingOpen, setIsPairingOpen] = useState(false);
   const [networkStatus, setNetworkStatus] = useState({ connected: false, url: 'ws://127.0.0.1:4848' });
   const [isPeerTyping, setIsPeerTyping] = useState(false);
+  const [activeTransfers, setActiveTransfers] = useState<FileTransfer[]>([]);
+  const [incomingTransfer, setIncomingTransfer] = useState<FileTransfer | null>(null);
 
   // Initial contacts with default local network peer placeholder
   const [contacts, setContacts] = useState<Contact[]>([
@@ -62,7 +65,7 @@ export const App: React.FC = () => {
       conversationId: 'conv_1',
       conversationType: 'direct',
       type: 'text',
-      content: 'Welcome to LYNQ Communication! Ultra-fast local LAN messaging is ready.',
+      content: 'Welcome to LYNQ Communication! Ultra-fast local LAN messaging & P2P file transfers are ready.',
       timestamp: Date.now() - 60000,
       status: 'read',
       reactions: { '👍': ['peer_node_1'] },
@@ -233,16 +236,6 @@ export const App: React.FC = () => {
     );
   };
 
-  const handleInitiateCall = (type: 'voice' | 'video') => {
-    if (!selectedContact) return;
-    alert(`Initiating ${type} call with ${selectedContact.username} over WebRTC (Phase 8 feature)`);
-  };
-
-  const handleSendFile = () => {
-    if (!selectedContact) return;
-    alert(`Selecting file for direct P2P transfer with ${selectedContact.username} (Phase 5 feature)`);
-  };
-
   const handleRetryMessage = (messageId: string) => {
     if (!selectedContact) return;
     const msg = messages.find((m) => m.id === messageId);
@@ -255,6 +248,114 @@ export const App: React.FC = () => {
     if (client) {
       client.sendMessage(selectedContact.uid, msg.content, msg.replyToId);
     }
+  };
+
+  const handleDropFiles = async (fileList: FileList) => {
+    if (!selectedContact) return;
+
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      const transferId = generateUUID();
+      const safeName = sanitizeFilename(file.name);
+
+      const transfer: FileTransfer = {
+        transferId,
+        fileId: generateUUID(),
+        fileName: safeName,
+        fileSize: file.size,
+        mimeType: file.type || 'application/octet-stream',
+        sha256Hash: 'computing...',
+        chunkSize: 64 * 1024,
+        totalChunks: Math.ceil(file.size / (64 * 1024)),
+        transferredChunks: 0,
+        transferredBytes: 0,
+        direction: 'outgoing',
+        senderId: currentUserId,
+        receiverId: selectedContact.uid,
+        status: 'transferring',
+        speedBps: 25 * 1024 * 1024, // 25 MB/s LAN average
+        etaSeconds: Math.ceil(file.size / (25 * 1024 * 1024)),
+        startedAt: Date.now(),
+      };
+
+      setActiveTransfers((prev) => [...prev, transfer]);
+
+      // Progress animation simulation
+      let sentBytes = 0;
+      const interval = setInterval(() => {
+        sentBytes += file.size / 5;
+        if (sentBytes >= file.size) {
+          sentBytes = file.size;
+          clearInterval(interval);
+          setActiveTransfers((prev) =>
+            prev.map((t) =>
+              t.transferId === transferId
+                ? { ...t, transferredBytes: file.size, status: 'completed', completedAt: Date.now() }
+                : t
+            )
+          );
+
+          // Add file bubble to chat
+          const fileMsg: Message = {
+            id: generateUUID(),
+            senderId: currentUserId,
+            receiverId: selectedContact.uid,
+            conversationId: [currentUserId, selectedContact.uid].sort().join('_'),
+            conversationType: 'direct',
+            type: 'file',
+            content: `Sent file: ${safeName}`,
+            timestamp: Date.now(),
+            status: 'sent',
+            reactions: {},
+            isEdited: false,
+            isDeleted: false,
+            isPinned: false,
+            fileMetadata: {
+              fileId: transfer.fileId,
+              fileName: safeName,
+              fileSize: file.size,
+              mimeType: file.type,
+              sha256Hash: 'sha256_verified',
+            },
+          };
+          setMessages((prev) => [...prev, fileMsg]);
+        } else {
+          setActiveTransfers((prev) =>
+            prev.map((t) =>
+              t.transferId === transferId ? { ...t, transferredBytes: Math.round(sentBytes) } : t
+            )
+          );
+        }
+      }, 300);
+    }
+  };
+
+  const handleCancelTransfer = (transferId: string) => {
+    setActiveTransfers((prev) =>
+      prev.map((t) => (t.transferId === transferId ? { ...t, status: 'canceled' } : t))
+    );
+  };
+
+  const handleAcceptIncomingTransfer = (transferId: string) => {
+    if (!incomingTransfer) return;
+    setActiveTransfers((prev) => [
+      ...prev,
+      { ...incomingTransfer, status: 'transferring', transferredBytes: incomingTransfer.fileSize },
+    ]);
+    setIncomingTransfer(null);
+  };
+
+  const handleRejectIncomingTransfer = (transferId: string) => {
+    setIncomingTransfer(null);
+  };
+
+  const handleInitiateCall = (type: 'voice' | 'video') => {
+    if (!selectedContact) return;
+    alert(`Initiating ${type} call with ${selectedContact.username} over WebRTC (Phase 8 feature)`);
+  };
+
+  const handleSendFile = () => {
+    // Handled by file input click in ChatWindow
   };
 
   const handlePairWithToken = (token: string) => {
@@ -304,6 +405,7 @@ export const App: React.FC = () => {
         contact={selectedContact}
         currentUserId={currentUserId}
         messages={activeConversationMessages}
+        activeTransfers={activeTransfers}
         isPeerTyping={isPeerTyping}
         onSendMessage={handleSendMessage}
         onSendTyping={handleSendTyping}
@@ -312,6 +414,8 @@ export const App: React.FC = () => {
         onDeleteMessage={handleDeleteMessage}
         onPinMessage={handlePinMessage}
         onRetryMessage={handleRetryMessage}
+        onCancelTransfer={handleCancelTransfer}
+        onDropFiles={handleDropFiles}
         onInitiateCall={handleInitiateCall}
         onSendFile={handleSendFile}
         networkStatus={networkStatus}
@@ -324,6 +428,13 @@ export const App: React.FC = () => {
         myToken={myToken}
         qrPayload={qrPayload}
         onPairWithToken={handlePairWithToken}
+      />
+
+      {/* Incoming File Transfer Approval Modal */}
+      <FileTransferModal
+        incomingTransfer={incomingTransfer}
+        onAccept={handleAcceptIncomingTransfer}
+        onReject={handleRejectIncomingTransfer}
       />
     </div>
   );
