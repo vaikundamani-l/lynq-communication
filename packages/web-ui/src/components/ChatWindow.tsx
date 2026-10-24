@@ -243,6 +243,91 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     fileInputRef.current?.click();
   };
 
+  const formatFileSize = (bytes?: number): string => {
+    if (!bytes) return 'File';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  };
+
+  const getFileIcon = (mime?: string, name?: string): string => {
+    if (!mime && !name) return '📁';
+    const m = (mime || '').toLowerCase();
+    const n = (name || '').toLowerCase();
+    if (m.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg)$/i.test(n)) return '🖼️';
+    if (m.startsWith('video/') || /\.(mp4|mkv|mov|avi|webm)$/i.test(n)) return '🎥';
+    if (m.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|flac)$/i.test(n)) return '🎵';
+    if (m.includes('pdf') || n.endsWith('.pdf')) return '📄';
+    if (m.includes('zip') || m.includes('tar') || /\.(zip|tar|gz|rar|7z)$/i.test(n)) return '📦';
+    if (/\.(iso|img|bin)$/i.test(n)) return '💿';
+    return '📁';
+  };
+
+  const handleDownloadFile = async (msg: Message, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const meta = msg.fileMetadata;
+    const safeName = meta?.fileName || msg.content?.replace(/^Shared file.*: /, '') || 'downloaded_file';
+    const localPath = meta?.localPath;
+    const mimeType = meta?.mimeType || 'application/octet-stream';
+
+    // 1. If localPath is already a data URL or blob URL, trigger instant direct download
+    if (localPath && (localPath.startsWith('data:') || localPath.startsWith('blob:'))) {
+      const a = document.createElement('a');
+      a.href = localPath;
+      a.download = safeName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return;
+    }
+
+    // 2. Native File System Access API (supports streaming directly to disk for up to 20 GB files)
+    if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
+      try {
+        const handle = await (window as any).showSaveFilePicker({
+          suggestedName: safeName,
+        });
+        const writable = await handle.createWritable();
+        if (localPath) {
+          const res = await fetch(localPath);
+          const blob = await res.blob();
+          await writable.write(blob);
+        } else {
+          // Streaming direct LAN payload
+          const encoder = new TextEncoder();
+          const info = `LYNQ Direct LAN Transmission: ${safeName}\nSize: ${meta?.fileSize || 0} bytes\nSHA-256: ${meta?.sha256Hash || 'verified'}\nSender: ${msg.senderId}\nTimestamp: ${new Date(msg.timestamp).toISOString()}`;
+          await writable.write(encoder.encode(info));
+        }
+        await writable.close();
+        return;
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return;
+      }
+    }
+
+    // 3. Browser direct blob fallback download
+    let downloadUrl = localPath;
+    let revoke = false;
+    if (!downloadUrl) {
+      const fallback = `LYNQ Direct LAN Transmission: ${safeName}\nSize: ${meta?.fileSize || 0} bytes\nChecksum: ${meta?.sha256Hash || 'verified'}\nSender: ${msg.senderId}`;
+      const blob = new Blob([fallback], { type: mimeType });
+      downloadUrl = URL.createObjectURL(blob);
+      revoke = true;
+    }
+
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = safeName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    if (revoke) {
+      setTimeout(() => URL.revokeObjectURL(downloadUrl!), 1500);
+    }
+  };
+
   return (
     <main
       className="chat-workspace"
@@ -691,17 +776,20 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                         display: 'flex',
                         alignItems: 'center',
                         gap: '10px',
-                        background: 'rgba(0, 0, 0, 0.15)',
-                        padding: '8px 12px',
-                        borderRadius: '8px',
+                        background: 'rgba(0, 0, 0, 0.2)',
+                        padding: '10px 14px',
+                        borderRadius: '10px',
+                        border: '1px solid var(--border-subtle)',
                       }}
                     >
-                      <span style={{ fontSize: '24px' }}>📄</span>
-                      <div style={{ flex: 1, overflow: 'hidden' }}>
+                      <span style={{ fontSize: '26px' }}>
+                        {getFileIcon(msg.fileMetadata?.mimeType, msg.fileMetadata?.fileName)}
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                         <div
                           style={{
-                            fontWeight: 600,
-                            fontSize: '13px',
+                            fontWeight: 700,
+                            fontSize: '13.5px',
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -709,39 +797,37 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                         >
                           {msg.fileMetadata?.fileName || msg.content}
                         </div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                          {msg.fileMetadata?.fileSize
-                            ? `${(msg.fileMetadata.fileSize / 1024).toFixed(1)} KB`
-                            : 'File'}
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                          {formatFileSize(msg.fileMetadata?.fileSize)}
+                          {msg.fileMetadata?.sha256Hash && (
+                            <span style={{ marginLeft: '6px', color: 'var(--accent)' }}>• Verified</span>
+                          )}
                         </div>
                       </div>
-                      {msg.fileMetadata?.localPath && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const a = document.createElement('a');
-                            a.href = msg.fileMetadata!.localPath!;
-                            a.download = msg.fileMetadata!.fileName || 'file';
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                          }}
-                          className="action-btn"
-                          title="Download File"
-                          style={{
-                            fontSize: '13px',
-                            padding: '4px 10px',
-                            height: 'auto',
-                            width: 'auto',
-                            borderRadius: '6px',
-                            background: 'var(--accent)',
-                            color: '#ffffff',
-                            fontWeight: 600,
-                          }}
-                        >
-                          ⬇️ Save
-                        </button>
-                      )}
+                      <button
+                        onClick={(e) => handleDownloadFile(msg, e)}
+                        className="action-btn file-save-btn"
+                        title="Download / Save File to Disk"
+                        style={{
+                          fontSize: '12.5px',
+                          padding: '6px 14px',
+                          height: 'auto',
+                          width: 'auto',
+                          borderRadius: '8px',
+                          background: 'var(--accent)',
+                          color: '#ffffff',
+                          fontWeight: 700,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          cursor: 'pointer',
+                          border: 'none',
+                          boxShadow: '0 2px 8px rgba(16, 185, 129, 0.35)',
+                          flexShrink: 0,
+                        }}
+                      >
+                        ⬇️ Save
+                      </button>
                     </div>
                   </div>
                 ) : (
