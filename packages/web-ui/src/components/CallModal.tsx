@@ -36,39 +36,35 @@ export const CallModal: React.FC<CallModalProps> = ({
   const initial = (peerName ? peerName[0] : '?').toUpperCase();
 
   return (
-    <div className="modal-overlay">
+    <div className="modal-overlay call-modal-overlay">
       <div
-        className="modal-card"
-        style={{
-          width: isVideo && isConnected ? '640px' : '400px',
-          padding: '24px',
-          textAlign: 'center',
-          borderRadius: '20px',
-        }}
+        className={`modal-card call-card ${isVideo && isConnected ? 'video-mode' : ''}`}
       >
-        {/* Header / Peer Identification */}
-        <div style={{ marginBottom: '20px' }}>
-          <div
-            className="avatar"
-            style={{
-              width: '72px',
-              height: '72px',
-              fontSize: '28px',
-              margin: '0 auto 12px',
-              boxShadow: 'var(--shadow-md)',
-            }}
-          >
-            {initial}
+        {/* Glow ambient background rings */}
+        <div className="call-ambient-glow" />
+
+        {/* Peer Identification & Ringing Animation */}
+        <div className="call-header-area">
+          <div className="call-avatar-container">
+            <div className={`call-avatar-halo ${isIncoming ? 'ringing-pulse' : ''}`} />
+            <div className="avatar call-avatar">{initial}</div>
+            {isConnected && <div className="call-online-dot" />}
           </div>
 
-          <h3 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '4px' }}>{peerName}</h3>
+          <h3 className="call-peer-name">{peerName}</h3>
 
-          <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-            {isIncoming && `Incoming ${callSession.type === 'video' ? 'Video' : 'Voice'} Call...`}
-            {callSession.status === 'initiating' && 'Calling...'}
+          <div className="call-status-badge">
+            {isIncoming && (
+              <span className="incoming-tag">
+                🔔 Incoming {callSession.type === 'video' ? 'Video' : 'Voice'} Call...
+              </span>
+            )}
+            {callSession.status === 'initiating' && (
+              <span className="calling-tag">📞 Dialing peer on local LAN...</span>
+            )}
             {isConnected && (
-              <span style={{ color: 'var(--status-online)', fontWeight: 600 }}>
-                {formatDuration(callSession.durationSeconds)} • Connected
+              <span className="connected-tag">
+                <span className="live-dot" /> {formatDuration(callSession.durationSeconds)} • Direct P2P Encrypted
               </span>
             )}
           </div>
@@ -76,142 +72,74 @@ export const CallModal: React.FC<CallModalProps> = ({
 
         {/* Video / Visual Stream Area */}
         {isConnected && isVideo && (
-          <div
-            style={{
-              position: 'relative',
-              height: '280px',
-              background: '#000000',
-              borderRadius: '12px',
-              marginBottom: '20px',
-              overflow: 'hidden',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            {/* Remote Video Feed Simulation */}
-            <div style={{ color: 'var(--text-muted)', fontSize: '14px' }}>
-              🎥 Remote Video Stream (Direct WebRTC Track)
+          <div className="call-video-container">
+            <div className="remote-video-placeholder">
+              <span className="video-icon">🎥</span>
+              <p>Direct WebRTC Video Stream Active</p>
+              <span className="stream-resolution-badge">1080p • 60 FPS • LAN</span>
             </div>
 
             {/* PiP Local Video Preview */}
-            <div
-              style={{
-                position: 'absolute',
-                bottom: '12px',
-                right: '12px',
-                width: '100px',
-                height: '75px',
-                background: '#1f2937',
-                borderRadius: '8px',
-                border: '2px solid var(--accent)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '10px',
-                color: 'white',
-              }}
-            >
-              {callSession.isVideoMuted ? 'Camera Off' : 'You (PiP)'}
+            <div className="pip-video-preview">
+              <span>You</span>
             </div>
           </div>
         )}
 
-        {/* Incoming Call Buttons: Accept / Decline */}
-        {isIncoming ? (
-          <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', marginTop: '16px' }}>
-            <button
-              onClick={onReject}
-              style={{
-                background: 'var(--accent-danger)',
-                color: 'white',
-                border: 'none',
-                width: '120px',
-                height: '44px',
-                borderRadius: '22px',
-                fontWeight: 600,
-                fontSize: '14px',
-                cursor: 'pointer',
-              }}
-            >
-              ✕ Decline
-            </button>
-            <button
-              onClick={onAccept}
-              style={{
-                background: 'var(--status-online)',
-                color: 'white',
-                border: 'none',
-                width: '120px',
-                height: '44px',
-                borderRadius: '22px',
-                fontWeight: 600,
-                fontSize: '14px',
-                cursor: 'pointer',
-              }}
-            >
-              ✓ Accept
-            </button>
-          </div>
-        ) : (
-          /* Active Call Control Action Bar */
-          <div style={{ display: 'flex', gap: '14px', justifyContent: 'center', alignItems: 'center' }}>
-            <button
-              onClick={onToggleMute}
-              className="rail-btn"
-              style={{
-                width: '50px',
-                height: '50px',
-                borderRadius: '50%',
-                background: callSession.isAudioMuted ? 'var(--accent-danger)' : 'var(--bg-active)',
-                color: 'white',
-                fontSize: '20px',
-              }}
-              title={callSession.isAudioMuted ? 'Unmute' : 'Mute'}
-            >
-              {callSession.isAudioMuted ? '🔇' : '🎤'}
-            </button>
-
-            {isVideo && (
+        {/* Control Action Buttons */}
+        <div className="call-actions-dock">
+          {isIncoming ? (
+            <div className="call-incoming-actions">
               <button
-                onClick={onToggleVideo}
-                className="rail-btn"
-                style={{
-                  width: '50px',
-                  height: '50px',
-                  borderRadius: '50%',
-                  background: callSession.isVideoMuted ? 'var(--accent-danger)' : 'var(--bg-active)',
-                  color: 'white',
-                  fontSize: '20px',
-                }}
-                title={callSession.isVideoMuted ? 'Turn Camera On' : 'Turn Camera Off'}
+                onClick={onReject}
+                className="call-ctrl-btn decline-btn"
+                title="Decline Call"
               >
-                {callSession.isVideoMuted ? '🚫' : '📹'}
+                <span>✕</span>
+                <span className="ctrl-label">Decline</span>
               </button>
-            )}
+              <button
+                onClick={onAccept}
+                className="call-ctrl-btn accept-btn"
+                title="Accept Call"
+              >
+                <span>📞</span>
+                <span className="ctrl-label">Accept</span>
+              </button>
+            </div>
+          ) : (
+            <div className="call-connected-actions">
+              <button
+                onClick={onToggleMute}
+                className={`call-ctrl-btn toggle-btn ${callSession.isAudioMuted ? 'active-mute' : ''}`}
+                title={callSession.isAudioMuted ? 'Unmute Microphone' : 'Mute Microphone'}
+              >
+                <span>{callSession.isAudioMuted ? '🔇' : '🎙️'}</span>
+                <span className="ctrl-label">{callSession.isAudioMuted ? 'Muted' : 'Mute'}</span>
+              </button>
 
-            <button
-              onClick={onHangup}
-              style={{
-                background: 'var(--accent-danger)',
-                color: 'white',
-                border: 'none',
-                width: '56px',
-                height: '56px',
-                borderRadius: '50%',
-                fontSize: '22px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: 'var(--shadow-md)',
-              }}
-              title="End Call"
-            >
-              📞
-            </button>
-          </div>
-        )}
+              {isVideo && (
+                <button
+                  onClick={onToggleVideo}
+                  className={`call-ctrl-btn toggle-btn ${callSession.isVideoMuted ? 'active-mute' : ''}`}
+                  title={callSession.isVideoMuted ? 'Turn Camera On' : 'Turn Camera Off'}
+                >
+                  <span>{callSession.isVideoMuted ? '🚫' : '📹'}</span>
+                  <span className="ctrl-label">{callSession.isVideoMuted ? 'Camera Off' : 'Camera'}</span>
+                </button>
+              )}
+
+              <button
+                onClick={onHangup}
+                className="call-ctrl-btn hangup-btn"
+                title="End Call"
+              >
+                <span>📞</span>
+                <span className="ctrl-label">Hang Up</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

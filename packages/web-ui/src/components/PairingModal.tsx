@@ -75,15 +75,16 @@ export const PairingModal: React.FC<PairingModalProps> = ({
             <div
               style={{
                 background: '#ffffff',
-                padding: '8px',
-                borderRadius: '12px',
+                padding: '12px',
+                borderRadius: '16px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: 'var(--shadow-md)',
+                boxShadow: '0 0 20px rgba(16, 185, 129, 0.25)',
+                border: '2px solid rgba(16, 185, 129, 0.4)',
               }}
             >
-              <img src={qrDataUrl} alt="Pairing QR Code" style={{ width: '130px', height: '130px', display: 'block' }} />
+              <img src={qrDataUrl} alt="Pairing QR Code" style={{ width: '130px', height: '130px', display: 'block', borderRadius: '4px' }} />
             </div>
           )}
 
@@ -97,7 +98,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
             <button
               onClick={handleCopy}
               className="action-btn"
-              style={{ width: '100%', height: '34px', fontSize: '12px', borderRadius: '6px', background: 'var(--bg-active)' }}
+              style={{ width: '100%', height: '36px', fontSize: '12.5px', fontWeight: 600, borderRadius: '8px', background: 'var(--bg-active)' }}
             >
               {copied ? '✓ Copied to Clipboard' : '📋 Copy Code'}
             </button>
@@ -120,7 +121,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
                 flex: 1,
                 background: 'var(--bg-input)',
                 border: '1px solid var(--border-strong)',
-                borderRadius: '8px',
+                borderRadius: '12px',
                 padding: '10px 14px',
                 color: 'var(--text-primary)',
                 fontFamily: 'monospace',
@@ -133,7 +134,7 @@ export const PairingModal: React.FC<PairingModalProps> = ({
             <button
               type="submit"
               className="send-btn"
-              style={{ borderRadius: '8px', width: 'auto', padding: '0 16px', fontSize: '14px', fontWeight: 600 }}
+              style={{ borderRadius: '12px', width: 'auto', padding: '0 20px', fontSize: '13.5px', fontWeight: 700 }}
               disabled={inputToken.trim().length < 4}
             >
               Verify & Pair

@@ -13,6 +13,35 @@ interface ConversationListProps {
   onOpenCreateGroup?: () => void;
 }
 
+const AVATAR_GRADIENTS = [
+  'linear-gradient(135deg, #10b981 0%, #059669 100%)', // Emerald
+  'linear-gradient(135deg, #06b6d4 0%, #0284c7 100%)', // Cyan / Sky
+  'linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%)', // Violet
+  'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)', // Rose
+  'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', // Amber
+  'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)', // Blue
+];
+
+const getAvatarGradient = (str: string): string => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % AVATAR_GRADIENTS.length;
+  return AVATAR_GRADIENTS[index];
+};
+
+const getPlatformIcon = (platform?: string): string => {
+  if (!platform) return '💻';
+  const p = platform.toLowerCase();
+  if (p.includes('android')) return '📱';
+  if (p.includes('ios') || p.includes('iphone') || p.includes('ipad')) return '📱';
+  if (p.includes('darwin') || p.includes('macos') || p.includes('mac')) return '🍏';
+  if (p.includes('win')) return '🪟';
+  if (p.includes('linux')) return '🐧';
+  return '💻';
+};
+
 export const ConversationList: React.FC<ConversationListProps> = ({
   contacts,
   groups = [],
@@ -49,49 +78,71 @@ export const ConversationList: React.FC<ConversationListProps> = ({
   const formatTimestamp = (timestamp?: number): string => {
     if (!timestamp) return '';
     const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const now = new Date();
+    if (date.toDateString() === now.toDateString()) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  };
+
+  const getUnreadCount = (targetId: string): number => {
+    return messages.filter(
+      (m) => m.senderId === targetId && m.status !== 'read'
+    ).length;
   };
 
   return (
     <section className="nav-panel">
+      {/* Top Header */}
       <div className="nav-header">
-        <h2 className="nav-title">Messages</h2>
-        <div style={{ display: 'flex', gap: '6px' }}>
+        <div className="nav-header-left">
+          <h2 className="nav-title">Conversations</h2>
+          <div className="lan-pulse-badge" title="Live LAN mesh networking is active">
+            <span className="lan-pulse-dot" />
+            <span className="lan-pulse-text">LAN DIRECT</span>
+          </div>
+        </div>
+
+        <div className="nav-actions">
           <button
             onClick={onOpenCreateGroup}
-            className="action-btn"
-            title="Create New Group"
-            style={{ fontSize: '12px', width: 'auto', padding: '0 8px', gap: '4px' }}
+            className="action-pill-btn"
+            title="Create Private Group"
           >
-            👥+ Group
+            <span>👥+</span>
+            <span className="pill-btn-label">Group</span>
           </button>
           <button
             onClick={onOpenPairing}
-            className="action-btn"
-            title="Pair New Device"
-            style={{ fontSize: '12px', width: 'auto', padding: '0 8px', gap: '4px' }}
+            className="action-pill-btn accent"
+            title="Scan QR / Pair Device"
           >
-            ➕ Pair
+            <span>➕</span>
+            <span className="pill-btn-label">Pair</span>
           </button>
         </div>
       </div>
 
+      {/* Modern Frosted Search Bar */}
       <div className="search-container">
         <div className="search-input-wrapper">
-          <span>🔍</span>
+          <span className="search-icon">🔍</span>
           <input
             type="text"
-            placeholder="Search chats, groups or messages"
+            placeholder="Search chats, peers or IP..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          {search && (
+          {search ? (
             <button
               onClick={() => setSearch('')}
-              style={{ background: 'none', border: 'none', color: 'gray', cursor: 'pointer' }}
+              className="search-clear-btn"
+              title="Clear search"
             >
               ✕
             </button>
+          ) : (
+            <span className="search-kbd-chip">/</span>
           )}
         </div>
       </div>
@@ -99,17 +150,10 @@ export const ConversationList: React.FC<ConversationListProps> = ({
       <div className="items-list">
         {/* Groups Section */}
         {filteredGroups.length > 0 && (
-          <div>
-            <div
-              style={{
-                fontSize: '11px',
-                fontWeight: 700,
-                color: 'var(--text-muted)',
-                padding: '8px 16px 4px',
-                textTransform: 'uppercase',
-              }}
-            >
-              Groups ({filteredGroups.length})
+          <div className="section-group">
+            <div className="section-header">
+              <span>Groups</span>
+              <span className="section-count">{filteredGroups.length}</span>
             </div>
             {filteredGroups.map((group) => {
               const lastMsg = getLastMessage(group.id);
@@ -123,8 +167,8 @@ export const ConversationList: React.FC<ConversationListProps> = ({
                 >
                   <div className="avatar-wrapper">
                     <div
-                      className="avatar"
-                      style={{ background: 'linear-gradient(135deg, #2563eb, #7c3aed)' }}
+                      className="avatar group-avatar"
+                      style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' }}
                     >
                       👥
                     </div>
@@ -142,16 +186,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
                       <span className="contact-preview">
                         {lastMsg ? lastMsg.content : `${group.members.length} members`}
                       </span>
-                      <span
-                        style={{
-                          fontSize: '10px',
-                          background: 'rgba(255,255,255,0.06)',
-                          padding: '1px 5px',
-                          borderRadius: '4px',
-                        }}
-                      >
-                        Group
-                      </span>
+                      <span className="chip-tag group-tag">Group</span>
                     </div>
                   </div>
                 </div>
@@ -161,30 +196,37 @@ export const ConversationList: React.FC<ConversationListProps> = ({
         )}
 
         {/* LAN Peers & Direct Contacts */}
-        <div
-          style={{
-            fontSize: '11px',
-            fontWeight: 700,
-            color: 'var(--text-muted)',
-            padding: '8px 16px 4px',
-            textTransform: 'uppercase',
-          }}
-        >
-          Direct Contacts ({filteredContacts.length})
+        <div className="section-header">
+          <span>LAN Peers & Contacts</span>
+          <span className="section-count">{filteredContacts.length}</span>
         </div>
 
         {filteredContacts.length === 0 ? (
-          <div style={{ padding: '30px 20px', textAlign: 'center', color: 'var(--text-muted)' }}>
-            <p style={{ marginBottom: '8px', fontSize: '14px' }}>No LAN peers found</p>
-            <p style={{ fontSize: '12px' }}>
-              Discovered devices on the same Wi-Fi or subnet appear here automatically.
+          <div className="empty-peers-container">
+            <div className="radar-scanner">
+              <div className="radar-circle circle-1" />
+              <div className="radar-circle circle-2" />
+              <div className="radar-circle circle-3" />
+              <div className="radar-sweep" />
+              <div className="radar-center">📡</div>
+            </div>
+            <h4 className="radar-title">Searching Wi-Fi for LYNQ Devices</h4>
+            <p className="radar-subtitle">
+              Open <strong>LYNQ</strong> on your phone or laptop on the same Wi-Fi network to connect and chat automatically.
             </p>
+            <button onClick={onOpenPairing} className="radar-cta-btn">
+              🔗 Show QR Pairing Code
+            </button>
           </div>
         ) : (
           filteredContacts.map((contact) => {
             const lastMsg = getLastMessage(contact.uid);
             const isSelected = selectedContactId === contact.uid;
             const initial = (contact.username ? contact.username[0] : '?').toUpperCase();
+            const avatarBg = getAvatarGradient(contact.username || contact.uid);
+            const platformIcon = getPlatformIcon(contact.deviceInfo?.platform);
+            const unreadCount = getUnreadCount(contact.uid);
+            const isOnline = contact.status === 'online';
 
             return (
               <div
@@ -193,8 +235,10 @@ export const ConversationList: React.FC<ConversationListProps> = ({
                 onClick={() => onSelectContact(contact)}
               >
                 <div className="avatar-wrapper">
-                  <div className="avatar">{initial}</div>
-                  <div className={`presence-badge ${contact.status || 'offline'}`} />
+                  <div className="avatar" style={{ background: avatarBg }}>
+                    {initial}
+                  </div>
+                  <div className={`presence-badge ${isOnline ? 'online' : 'offline'}`} />
                 </div>
 
                 <div className="contact-info">
@@ -207,15 +251,34 @@ export const ConversationList: React.FC<ConversationListProps> = ({
 
                   <div className="contact-preview-row">
                     <span className="contact-preview">
-                      {lastMsg
-                        ? lastMsg.content
-                        : `${contact.ipAddress} • ${contact.deviceInfo?.platform || 'LAN'}`}
+                      {lastMsg ? (
+                        <>
+                          {lastMsg.senderId !== contact.uid && (
+                            <span className="msg-preview-tick">
+                              {lastMsg.status === 'read' ? '✓✓ ' : '✓ '}
+                            </span>
+                          )}
+                          {lastMsg.type === 'voice'
+                            ? '🎙️ Voice note'
+                            : lastMsg.type === 'file'
+                            ? `📄 ${lastMsg.content}`
+                            : lastMsg.content}
+                        </>
+                      ) : (
+                        <span className="contact-subdetail">
+                          {platformIcon} {contact.ipAddress}
+                        </span>
+                      )}
                     </span>
-                    {contact.isPaired && (
-                      <span title="Paired device" style={{ fontSize: '11px', color: 'var(--accent)' }}>
-                        🔒
+
+                    <div className="contact-badges-row">
+                      {unreadCount > 0 && (
+                        <span className="unread-counter-pill">{unreadCount}</span>
+                      )}
+                      <span className="chip-tag p2p-tag" title="Direct Peer-to-Peer">
+                        P2P
                       </span>
-                    )}
+                    </div>
                   </div>
                 </div>
               </div>

@@ -14,7 +14,6 @@ export const VoiceMessageBubble: React.FC<VoiceMessageBubbleProps> = ({ message 
   const duration = message.fileMetadata?.durationSeconds || 5;
 
   useEffect(() => {
-    // Construct audio source from metadata localPath or synthesized tone
     const audio = new Audio();
     if (message.fileMetadata?.localPath) {
       audio.src = message.fileMetadata.localPath;
@@ -77,68 +76,48 @@ export const VoiceMessageBubble: React.FC<VoiceMessageBubbleProps> = ({ message 
     return `${mins}:${s.toString().padStart(2, '0')}`;
   };
 
+  const waveformHeights = [12, 18, 9, 24, 15, 11, 22, 14, 25, 10, 19, 13, 21, 15, 18, 12, 23, 14, 9, 16];
+
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        padding: '6px 4px',
-        minWidth: '220px',
-      }}
-    >
+    <div className={`voice-bubble-container ${isPlaying ? 'playing' : ''}`}>
       <button
         onClick={togglePlay}
-        className="send-btn"
-        style={{
-          width: '36px',
-          height: '36px',
-          fontSize: '15px',
-          flexShrink: 0,
-        }}
-        title={isPlaying ? 'Pause' : 'Play'}
+        className={`voice-play-btn ${isPlaying ? 'is-playing' : ''}`}
+        title={isPlaying ? 'Pause' : 'Play Voice Note'}
       >
-        {isPlaying ? '⏸' : '▶'}
+        <span className="play-icon">{isPlaying ? '⏸' : '▶'}</span>
       </button>
 
-      {/* Waveform visualization */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '3px', height: '22px' }}>
-          {[12, 18, 8, 22, 15, 10, 19, 14, 21, 9, 17, 12, 20, 14, 18, 10].map((h, i) => {
-            const isPlayed = (i / 16) <= (currentTime / duration);
+      {/* Dynamic Soundwave Equalizer Visualization */}
+      <div className="voice-waveform-area">
+        <div className="voice-bars-container">
+          {waveformHeights.map((h, i) => {
+            const isPlayed = i / waveformHeights.length <= currentTime / duration;
             return (
               <span
                 key={i}
+                className={`waveform-bar ${isPlayed ? 'played' : ''} ${isPlaying ? 'dancing' : ''}`}
                 style={{
-                  width: '3px',
                   height: `${h}px`,
-                  background: isPlayed ? 'var(--text-highlight)' : 'var(--text-muted)',
-                  borderRadius: '2px',
-                  transition: 'background 0.15s ease',
+                  animationDelay: `${(i % 5) * 0.12}s`,
                 }}
               />
             );
           })}
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: 'var(--text-muted)' }}>
-          <span>{isPlaying ? formatSec(currentTime) : formatSec(duration)}</span>
+        <div className="voice-meta-row">
+          <span className="voice-time">
+            {isPlaying ? formatSec(currentTime) : formatSec(duration)}
+          </span>
+          <span className="voice-format-pill">HD AUDIO</span>
         </div>
       </div>
 
       {/* Playback speed toggle */}
       <button
         onClick={cycleSpeed}
-        style={{
-          background: 'var(--bg-active)',
-          border: 'none',
-          color: 'var(--text-primary)',
-          borderRadius: '12px',
-          padding: '2px 7px',
-          fontSize: '11px',
-          fontWeight: 700,
-          cursor: 'pointer',
-        }}
+        className="voice-speed-pill"
         title="Playback Speed"
       >
         {speed}x
