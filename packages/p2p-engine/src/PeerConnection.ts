@@ -50,6 +50,7 @@ export class LynqPeerConnection {
   private pc: RTCPeerConnection | null = null;
   private dataChannel: RTCDataChannel | null = null;
   private callbacks: PeerConnectionCallbacks;
+  private pendingIceCandidates: RTCIceCandidateInit[] = [];
 
   // ICE Servers (Local LAN defaults with public STUN fallback if needed)
   private iceServers: RTCIceServer[] = [
@@ -157,6 +158,8 @@ export class LynqPeerConnection {
 
     try {
       await this.pc.setRemoteDescription({ type: 'offer', sdp });
+      await this.drainPendingIceCandidates();
+
       const answer = await this.pc.createAnswer();
       await this.pc.setLocalDescription(answer);
 
@@ -180,17 +183,43 @@ export class LynqPeerConnection {
     if (!this.pc) return;
     try {
       await this.pc.setRemoteDescription({ type: 'answer', sdp });
+      await this.drainPendingIceCandidates();
     } catch {
       this.setState('failed');
     }
   }
 
   public async handleRemoteIceCandidate(candidateInit: RTCIceCandidateInit): Promise<void> {
-    if (!this.pc) return;
+    if (!candidateInit) return;
+
+    // If RTCPeerConnection is not initialized or remote description is not yet set,
+    // buffer candidate to prevent native InvalidStateError exceptions
+    if (!this.pc || !this.pc.remoteDescription) {
+      this.pendingIceCandidates.push(candidateInit);
+      return;
+    }
+
     try {
       await this.pc.addIceCandidate(new RTCIceCandidate(candidateInit));
-    } catch {
-      // candidate could arrive before remote desc; ignored
+    } catch (err) {
+      console.warn('LynqPeerConnection addIceCandidate error (non-fatal):', err);
+    }
+  }
+
+  private async drainPendingIceCandidates(): Promise<void> {
+    if (!this.pc || !this.pc.remoteDescription || this.pendingIceCandidates.length === 0) {
+      return;
+    }
+
+    const queue = [...this.pendingIceCandidates];
+    this.pendingIceCandidates = [];
+
+    for (const cand of queue) {
+      try {
+        await this.pc.addIceCandidate(new RTCIceCandidate(cand));
+      } catch (err) {
+        console.warn('LynqPeerConnection drained ICE candidate error (non-fatal):', err);
+      }
     }
   }
 
@@ -307,6 +336,7 @@ export class LynqPeerConnection {
   }
 
   public close(): void {
+    this.pendingIceCandidates = [];
     if (this.dataChannel) {
       try {
         this.dataChannel.close();

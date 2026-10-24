@@ -6,6 +6,7 @@ export interface MdnsOptions {
   uid: string;
   username: string;
   port: number;
+  ipAddress?: string;
   deviceInfo: DeviceInfo;
 }
 
@@ -18,6 +19,7 @@ export class MdnsDiscovery extends EventEmitter {
   private uid: string;
   private username: string;
   private port: number;
+  private ipAddress?: string;
   private deviceInfo: DeviceInfo;
 
   constructor(options: MdnsOptions) {
@@ -25,6 +27,7 @@ export class MdnsDiscovery extends EventEmitter {
     this.uid = options.uid;
     this.username = options.username;
     this.port = options.port;
+    this.ipAddress = options.ipAddress;
     this.deviceInfo = options.deviceInfo;
   }
 
@@ -73,6 +76,39 @@ export class MdnsDiscovery extends EventEmitter {
 
       this.emit('peerFound', contact);
     });
+
+    // 3. Directly respond to mDNS A-record queries for 'lynq.local' pointing to our LAN IP
+    if (this.ipAddress) {
+      try {
+        const mdns = (this.bonjour as any).server?.mdns;
+        if (mdns) {
+          mdns.on('query', (query: any) => {
+            if (
+              query?.questions?.some(
+                (q: any) => q.name && q.name.toLowerCase() === 'lynq.local'
+              )
+            ) {
+              try {
+                mdns.respond({
+                  answers: [
+                    {
+                      name: 'lynq.local',
+                      type: 'A',
+                      ttl: 120,
+                      data: this.ipAddress,
+                    },
+                  ],
+                });
+              } catch {
+                // ignore
+              }
+            }
+          });
+        }
+      } catch {
+        // non-fatal
+      }
+    }
   }
 
   public stop(): void {

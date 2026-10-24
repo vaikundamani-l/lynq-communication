@@ -94,6 +94,87 @@ describe('@lynq/network-service tests', () => {
       aliceWs.close();
       bobWs.close();
     });
+
+    it('rejects identity spoofing when client attempts to forge senderId', async () => {
+      const aliceWs = new WebSocket(`ws://127.0.0.1:${testPort}`);
+      await new Promise((resolve) => aliceWs.on('open', resolve));
+
+      const bobWs = new WebSocket(`ws://127.0.0.1:${testPort}`);
+      await new Promise((resolve) => bobWs.on('open', resolve));
+
+      // Alice authenticates as 'alice'
+      aliceWs.send(
+        JSON.stringify({
+          id: generateUUID(),
+          type: 'ping',
+          senderId: 'alice',
+          recipientId: 'server',
+          timestamp: Date.now(),
+          payload: null,
+        })
+      );
+
+      // Bob authenticates as 'bob'
+      bobWs.send(
+        JSON.stringify({
+          id: generateUUID(),
+          type: 'ping',
+          senderId: 'bob',
+          recipientId: 'server',
+          timestamp: Date.now(),
+          payload: null,
+        })
+      );
+      await new Promise((r) => setTimeout(r, 50));
+
+      let securityViolationTriggered = false;
+      server.on('securityViolation', (violation) => {
+        if (violation.type === 'identity_spoofing') {
+          securityViolationTriggered = true;
+          expect(violation.boundUid).toBe('alice');
+          expect(violation.attemptedSenderId).toBe('mallory_forged');
+        }
+      });
+
+      let bobReceivedForged = false;
+      bobWs.on('message', (data) => {
+        const parsed = JSON.parse(data.toString('utf8'));
+        if (parsed.senderId === 'mallory_forged') {
+          bobReceivedForged = true;
+        }
+      });
+
+      const aliceErrorPromise = new Promise<any>((resolve) => {
+        aliceWs.on('message', (data) => {
+          const parsed = JSON.parse(data.toString('utf8'));
+          if (parsed.type === 'error' && parsed.payload?.code === 'IDENTITY_SPOOFING_REJECTED') {
+            resolve(parsed);
+          }
+        });
+      });
+
+      // Alice attempts to send a message claiming to be 'mallory_forged'
+      const spoofedMsg: SignalingEnvelope = {
+        id: generateUUID(),
+        type: 'msg:send',
+        senderId: 'mallory_forged',
+        recipientId: 'bob',
+        timestamp: Date.now(),
+        payload: { text: 'Spoofed message!' },
+      };
+      aliceWs.send(JSON.stringify(spoofedMsg));
+
+      const errResponse = await aliceErrorPromise;
+      expect(errResponse.payload.code).toBe('IDENTITY_SPOOFING_REJECTED');
+      expect(securityViolationTriggered).toBe(true);
+
+      // Verify Bob never receives the forged message
+      await new Promise((r) => setTimeout(r, 100));
+      expect(bobReceivedForged).toBe(false);
+
+      aliceWs.close();
+      bobWs.close();
+    });
   });
 
   describe('PairingManager', () => {

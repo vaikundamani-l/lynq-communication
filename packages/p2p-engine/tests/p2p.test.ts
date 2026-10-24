@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { P2PTransportRouter } from '../src/index.js';
+import { P2PTransportRouter, LynqPeerConnection } from '../src/index.js';
 import { Message, generateUUID, SignalingEnvelope } from '@lynq/core';
 
 describe('@lynq/p2p-engine tests', () => {
@@ -86,5 +86,81 @@ describe('@lynq/p2p-engine tests', () => {
     router.routeDelete('user_bob', msgId);
     expect(sentSignaling[1].type).toBe('msg:delete');
     expect((sentSignaling[1].payload as any).messageId).toBe(msgId);
+  });
+
+  it('buffers early ICE candidates and flushes them when remote description is set', async () => {
+    const addedCandidates: any[] = [];
+
+    class MockRTCPeerConnection {
+      remoteDescription: any = null;
+      connectionState = 'new';
+      onicecandidate: any = null;
+      onconnectionstatechange: any = null;
+      ondatachannel: any = null;
+
+      async setRemoteDescription(desc: any) {
+        this.remoteDescription = desc;
+      }
+      async createAnswer() {
+        return { type: 'answer', sdp: 'dummy-answer-sdp' };
+      }
+      async setLocalDescription(_desc: any) {}
+      async addIceCandidate(cand: any) {
+        if (!this.remoteDescription) {
+          throw new Error('InvalidStateError: remoteDescription not set');
+        }
+        addedCandidates.push(cand);
+      }
+      close() {}
+    }
+
+    class MockRTCIceCandidate {
+      candidate: string;
+      constructor(init: any) {
+        this.candidate = init.candidate;
+      }
+    }
+
+    const origPC = (globalThis as any).RTCPeerConnection;
+    const origCand = (globalThis as any).RTCIceCandidate;
+    (globalThis as any).RTCPeerConnection = MockRTCPeerConnection;
+    (globalThis as any).RTCIceCandidate = MockRTCIceCandidate;
+
+    try {
+      const conn = new LynqPeerConnection('alice', 'bob', {
+        onStateChange: vi.fn(),
+        onMessage: vi.fn(),
+        onAck: vi.fn(),
+        onReadReceipt: vi.fn(),
+        onTyping: vi.fn(),
+        onReaction: vi.fn(),
+        onEdit: vi.fn(),
+        onDelete: vi.fn(),
+        onSignalNeeded: vi.fn(),
+      });
+
+      conn.initialize(false);
+
+      // 1. Send candidate BEFORE remote description is set
+      await conn.handleRemoteIceCandidate({ candidate: 'candidate:1 1 UDP ...' });
+      expect(addedCandidates).toHaveLength(0); // must be buffered, not immediately added
+
+      // 2. Set remote offer
+      await conn.handleRemoteOffer('mock-offer-sdp');
+
+      // 3. Verify queued candidate was drained and added successfully
+      expect(addedCandidates).toHaveLength(1);
+      expect(addedCandidates[0].candidate).toBe('candidate:1 1 UDP ...');
+
+      // 4. Send next candidate AFTER remote description is set
+      await conn.handleRemoteIceCandidate({ candidate: 'candidate:2 1 UDP ...' });
+      expect(addedCandidates).toHaveLength(2);
+      expect(addedCandidates[1].candidate).toBe('candidate:2 1 UDP ...');
+
+      conn.close();
+    } finally {
+      (globalThis as any).RTCPeerConnection = origPC;
+      (globalThis as any).RTCIceCandidate = origCand;
+    }
   });
 });

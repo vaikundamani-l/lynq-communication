@@ -91,24 +91,87 @@ export class SignalingServer extends EventEmitter {
 
         const envelope: SignalingEnvelope = JSON.parse(rawStr);
 
-        // Register or refresh client WebSocket reference
-        if (envelope.senderId) {
-          if (!clientUid) {
-            clientUid = envelope.senderId;
-            this.clients.set(clientUid, ws);
-            this.emit('clientConnected', clientUid);
-          } else {
-            this.clients.set(envelope.senderId, ws);
+        // Security check: validate envelope structure
+        if (!envelope || typeof envelope !== 'object' || !envelope.senderId || typeof envelope.senderId !== 'string') {
+          this.emit('securityViolation', { type: 'invalid_envelope', reason: 'Missing or invalid senderId' });
+          return;
+        }
+
+        // Connection-level Identity Binding and Anti-Spoofing Enforcement
+        if (!clientUid) {
+          // Initial registration for this WebSocket connection
+          const candidateUid = envelope.senderId.trim();
+          if (!candidateUid) {
+            this.emit('securityViolation', { type: 'invalid_envelope', reason: 'Empty senderId' });
+            return;
+          }
+
+          const existingWs = this.clients.get(candidateUid);
+          if (existingWs && existingWs !== ws && existingWs.readyState === WebSocket.OPEN) {
+            // Prevent takeover of an already connected peer's identity
+            this.emit('securityViolation', {
+              type: 'identity_conflict',
+              senderId: candidateUid,
+              reason: 'An active connection already exists for this UID',
+            });
+            try {
+              ws.send(
+                JSON.stringify({
+                  id: generateUUID(),
+                  type: 'error',
+                  senderId: 'server',
+                  recipientId: candidateUid,
+                  timestamp: Date.now(),
+                  payload: {
+                    code: 'IDENTITY_CONFLICT',
+                    message: `An active connection already exists for UID: ${candidateUid}`,
+                  },
+                })
+              );
+            } catch {
+              // ignore send error
+            }
+            return;
+          }
+
+          clientUid = candidateUid;
+          this.clients.set(clientUid, ws);
+          this.emit('clientConnected', clientUid);
+        } else {
+          // Connection is already bound to clientUid. Enforce that senderId matches exactly!
+          if (envelope.senderId !== clientUid) {
+            this.emit('securityViolation', {
+              type: 'identity_spoofing',
+              boundUid: clientUid,
+              attemptedSenderId: envelope.senderId,
+              messageType: envelope.type,
+            });
+            try {
+              ws.send(
+                JSON.stringify({
+                  id: generateUUID(),
+                  type: 'error',
+                  senderId: 'server',
+                  recipientId: envelope.senderId,
+                  timestamp: Date.now(),
+                  payload: {
+                    code: 'IDENTITY_SPOOFING_REJECTED',
+                    message: `Sender ID '${envelope.senderId}' does not match authenticated connection UID '${clientUid}'`,
+                  },
+                })
+              );
+            } catch {
+              // ignore send error
+            }
+            return; // Drop message immediately
           }
         }
 
-        // Enforce rate limit per sender
-        if (envelope.senderId) {
-          const check = this.rateLimiter.checkLimit(envelope.senderId, this.rateLimitPerSec, 1000);
-          if (!check.allowed) {
-            this.emit('rateLimitExceeded', { senderId: envelope.senderId, remainingMs: check.resetMs });
-            return;
-          }
+        // Enforce rate limit per authenticated sender
+        const check = this.rateLimiter.checkLimit(clientUid, this.rateLimitPerSec, 1000);
+        if (!check.allowed) {
+          this.emit('rateLimitExceeded', { senderId: clientUid, remainingMs: check.resetMs });
+          return;
         }
 
         this.routeMessage(envelope, ws);

@@ -123,6 +123,7 @@ export class LynqDaemon extends EventEmitter {
       uid,
       username,
       port: signalingPort,
+      ipAddress,
       deviceInfo,
     });
 
@@ -196,6 +197,11 @@ export class LynqDaemon extends EventEmitter {
     // Signaling server incoming messages
     this.signalingServer.on('error', (err) => {
       console.warn('SignalingServer internal error (non-fatal):', err);
+    });
+
+    this.signalingServer.on('securityViolation', (violation) => {
+      console.warn('SignalingServer security violation detected and blocked:', violation);
+      this.emit('securityViolation', violation);
     });
 
     this.signalingServer.on('message', (envelope: SignalingEnvelope) => {

@@ -125,10 +125,82 @@ export const App: React.FC = () => {
   const selectedContactIdRef = useRef<string | null>(null);
   selectedContactIdRef.current = selectedContactId;
 
-  const selectedContact = contacts.find((c) => c.uid === selectedContactId) || null;
+  const selectedContact =
+    contacts.find((c) => c.uid === selectedContactId) ||
+    (selectedContactId
+      ? {
+          uid: selectedContactId,
+          username: selectedContactId.startsWith('user_')
+            ? `Peer (${selectedContactId.slice(5, 9)})`
+            : selectedContactId,
+          ipAddress: 'LAN Discovery',
+          port: 4848,
+          status: 'offline' as const,
+          isPaired: false,
+          lastSeen: 0,
+          deviceInfo: {
+            deviceId: 'dev_' + selectedContactId,
+            deviceName: 'LAN Peer',
+            platform: 'linux' as const,
+            appVersion: '0.1.0',
+          },
+        }
+      : null);
   const selectedGroup = groups.find((g) => g.id === selectedGroupId) || null;
 
   const [client, setClient] = useState<LynqClient | null>(null);
+
+  // Synchronize Browser Back/Forward, PopState, and Hash Navigation
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const parseRoute = () => {
+      const hash = window.location.hash || '';
+      if (hash.startsWith('#/chat/')) {
+        const uid = hash.slice('#/chat/'.length);
+        if (uid) {
+          setSelectedContactId(uid);
+          setSelectedGroupId(null);
+        }
+      } else if (hash.startsWith('#/group/')) {
+        const gid = hash.slice('#/group/'.length);
+        if (gid) {
+          setSelectedGroupId(gid);
+          setSelectedContactId(null);
+        }
+      } else if (hash === '#/' || hash === '' || hash === '#/chats' || hash === '#/peers') {
+        setSelectedContactId(null);
+        setSelectedGroupId(null);
+      }
+    };
+
+    // Parse on initial mount
+    parseRoute();
+
+    const onPopState = () => {
+      parseRoute();
+    };
+
+    window.addEventListener('popstate', onPopState);
+    window.addEventListener('hashchange', onPopState);
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsPairingOpen(false);
+        setIsCreateGroupOpen(false);
+        setIsSettingsOpen(false);
+        setIsDiagnosticsOpen(false);
+        setForwardingMessage(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+      window.removeEventListener('hashchange', onPopState);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
 
   // Sync contacts to localStorage
   useEffect(() => {
@@ -395,11 +467,19 @@ export const App: React.FC = () => {
   const handleSelectContact = (contact: Contact) => {
     setSelectedContactId(contact.uid);
     setSelectedGroupId(null);
+    const targetHash = `#/chat/${contact.uid}`;
+    if (typeof window !== 'undefined' && window.location.hash !== targetHash) {
+      window.history.pushState({ type: 'chat', id: contact.uid }, '', targetHash);
+    }
   };
 
   const handleSelectGroup = (group: Group) => {
     setSelectedGroupId(group.id);
     setSelectedContactId(null);
+    const targetHash = `#/group/${group.id}`;
+    if (typeof window !== 'undefined' && window.location.hash !== targetHash) {
+      window.history.pushState({ type: 'group', id: group.id }, '', targetHash);
+    }
   };
 
   const handleCreateGroup = (name: string, description: string, selectedMemberIds: string[]) => {
@@ -427,6 +507,9 @@ export const App: React.FC = () => {
     setGroups((prev) => [newGroup, ...prev]);
     setSelectedGroupId(groupId);
     setSelectedContactId(null);
+    if (typeof window !== 'undefined') {
+      window.history.pushState({ type: 'group', id: groupId }, '', `#/group/${groupId}`);
+    }
 
     // Add system message
     const sysMsg: Message = {
@@ -917,6 +1000,15 @@ export const App: React.FC = () => {
         onBack={() => {
           setSelectedContactId(null);
           setSelectedGroupId(null);
+          if (typeof window !== 'undefined') {
+            if (window.location.hash.startsWith('#/chat/') || window.location.hash.startsWith('#/group/')) {
+              if (window.history.state && window.history.state.type) {
+                window.history.back();
+              } else {
+                window.history.pushState({ type: 'home' }, '', '#/');
+              }
+            }
+          }
         }}
         networkStatus={networkStatus}
       />

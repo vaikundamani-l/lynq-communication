@@ -4,8 +4,8 @@
 
 [![CI](https://github.com/vaikundamani-l/lynq-communication/actions/workflows/ci.yml/badge.svg)](https://github.com/vaikundamani-l/lynq-communication/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests Passing](https://img.shields.io/badge/Tests-38%2F38%20Passing-brightgreen.svg)](packages/)
-[![Security: Audited](https://img.shields.io/badge/Security-Local--First%20%7C%20Zero--Cloud-success.svg)](SECURITY.md)
+[![Tests Passing](https://img.shields.io/badge/Tests-42%2F42%20Passing-brightgreen.svg)](packages/)
+[![Security: Audited](https://img.shields.io/badge/Security-Local--First%20%7C%20Anti--Spoofing%20%7C%20Zero--Cloud-success.svg)](SECURITY.md)
 
 **An open-source, local-first cross-platform messaging, group communication, high-speed file transfer, and WebRTC calling platform.**
 
@@ -48,22 +48,29 @@ Whether you are collaborating in an office without internet access, sharing larg
 - **Rich Message Actions**: Message editing, soft deletion, reply quotes, forwarding, pinned messages, and emoji reactions (`👍`, `❤️`, `😂`, `😮`, `😢`, `🔥`).
 - **Typing Indicators & Presence**: Throttled typing feedback and online/away/offline device status.
 
-### 2. High-Speed P2P Media & File Sharing
-- **Direct P2P Streaming**: 64 KB chunking engine with backpressure management via WebRTC DataChannels.
-- **Any File Format**: Seamless sharing of images, videos, audio, PDF documents, and archives of any size.
-- **Full Integrity Verification**: End-to-end SHA-256 cryptographic verification ensuring byte-perfect transfers.
-- **Safety First**: Filename sanitization against directory traversal (`../`), bounded memory, no auto-execution, and mandatory user approval for incoming transfers.
-- **Transfer Progress**: Real-time progress bars, throughput rate (MB/s), ETA calculations, and cancel/retry controls.
+### 2. High-Speed P2P Media & 20 GB File Transfers
+- **Massive 20 GB Capacity**: Supports direct bit-for-bit transfers from small photos up to 20 GB archives with zero-RAM memory exhaustion.
+- **Adaptive Chunking Engine**: Dynamically calculates optimal chunk sizing (64 KB for $\le 10$ MB, 256 KB for $\le 100$ MB, 1 MB for $\le 1$ GB, 2 MB for $\le 20$ GB) with backpressure flow control.
+- **Direct Disk-Backed Streaming**: Streaming `ChunkSink` reception writes incoming chunks directly to local storage without buffering multi-gigabyte blobs in RAM.
+- **Always-Visible Save/Download**: Received file cards always provide a one-click "⬇️ Save" option with clear human-readable size formatting (`B`, `KB`, `MB`, `GB`).
+- **Cryptographic Integrity**: Streaming SHA-256 fingerprinting guarantees 100% bit-for-bit file authenticity before completion.
 
 ### 3. Voice Messages & WebRTC Calling
 - **Interactive Voice Notes**: In-browser audio recording with live animated waveform player, scrub controls, and variable playback speeds (`1.0x`, `1.5x`, `2.0x`).
 - **One-to-One Audio & Video Calling**: Ultra-low latency voice and video calls powered by WebRTC DTLS/SRTP with camera switching, mute controls, and call duration tracking.
+- **ICE Candidate Queuing**: Early ICE candidates arriving before remote description negotiation are safely buffered and drained, eliminating call setup drops.
 - **Hardware Privacy**: Microphone and camera hardware are immediately released when calls or recordings end.
 
-### 4. Zero-Config Device Discovery & Pairing
+### 4. Zero-Config Device Discovery & `lynq.local` Access
+- **Local Network Hostname**: Reachable at `http://lynq.local:5173` (or `http://lynq.local` with port 80 forwarding) via built-in mDNS advertising on your LAN.
 - **mDNS & UDP Discovery**: Automatic local network peer discovery via `_lynq._tcp.local` and UDP port `5555`.
+- **Anti-Spoofing Signaling**: WebSocket connections strictly enforce identity binding; forged `senderId` envelopes are dropped and flagged as security violations.
 - **QR-Code Pairing**: Interactive pairing flow with 6-character short-lived tokens (10-minute TTL) and camera QR scanner integration.
 - **Brute Force Protection**: Automatic sliding-window rate limiting locks out hostile nodes after repeated failed pairing attempts.
+
+### 5. Mobile Responsive UX & Native Browser Navigation
+- **Responsive Mobile Layout**: WhatsApp-style 4-tab bottom navigation (`Chats`, `Peers`, `Pair`, `Settings`), sliding chat window, and bottom action sheets.
+- **Browser History & Back/Forward**: Complete native History API integration (`popstate` and hash routing `#/chat/:id`, `#/group/:id`). Tapping Back in mobile Chrome smoothly navigates from chat to conversation list without exiting the page or trapping the user.
 
 ### 5. Local-First & Offline Resilience
 - **Offline SQLite Storage**: All messages, contacts, and transfer logs are saved locally in WAL mode (`better-sqlite3`).
