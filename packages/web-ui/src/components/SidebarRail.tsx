@@ -43,6 +43,7 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
         title="Active Chats"
       >
         <span className="rail-btn-icon">💬</span>
+        <span className="rail-btn-label">Chats</span>
         <span className="rail-tooltip">Chats</span>
       </button>
 
@@ -52,6 +53,7 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
         title="Discovered LAN Peers"
       >
         <span className="rail-btn-icon">👥</span>
+        <span className="rail-btn-label">Peers</span>
         <span className="rail-tooltip">Peers</span>
       </button>
 
@@ -61,6 +63,7 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
         title="QR Device Pairing"
       >
         <span className="rail-btn-icon">🔗</span>
+        <span className="rail-btn-label">Pair</span>
         <span className="rail-tooltip">Pair Device</span>
       </button>
 
@@ -70,6 +73,7 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
         title="LAN Network Diagnostics"
       >
         <span className="rail-btn-icon">📊</span>
+        <span className="rail-btn-label">Network</span>
         <span className="rail-tooltip">Diagnostics</span>
       </button>
 
@@ -82,6 +86,7 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
         title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
       >
         <span className="rail-btn-icon">{theme === 'dark' ? '☀️' : '🌙'}</span>
+        <span className="rail-btn-label">{theme === 'dark' ? 'Theme' : 'Theme'}</span>
         <span className="rail-tooltip">{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
       </button>
 
@@ -92,6 +97,7 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
         title="Settings & Storage"
       >
         <span className="rail-btn-icon">⚙️</span>
+        <span className="rail-btn-label">Settings</span>
         <span className="rail-tooltip">Settings</span>
       </button>
     </aside>

@@ -64,6 +64,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [showSearch, setShowSearch] = useState(false);
   const [chatSearchText, setChatSearchText] = useState('');
   const [showGallery, setShowGallery] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
 
   // Voice recording state
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
@@ -325,7 +326,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         <div className="chat-actions">
           {group && (
             <button
-              className="action-btn"
+              className="action-btn desktop-only"
               title="View Group Members"
               onClick={() => setShowMembersDrawer((prev) => !prev)}
               style={{ width: 'auto', padding: '0 10px', fontSize: '13px', gap: '4px' }}
@@ -334,7 +335,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </button>
           )}
           <button
-            className={`action-btn ${showSearch ? 'active' : ''}`}
+            className={`action-btn desktop-only ${showSearch ? 'active' : ''}`}
             title="Search in conversation"
             onClick={() => {
               setShowSearch((prev) => !prev);
@@ -344,7 +345,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             🔍
           </button>
           <button
-            className="action-btn"
+            className="action-btn desktop-only"
             title="Media & Files Gallery"
             onClick={() => setShowGallery(true)}
           >
@@ -356,11 +357,68 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           <button className="action-btn call-action-btn" title="Video Call" onClick={() => onInitiateCall('video')}>
             📹
           </button>
-          <button className="action-btn" title="Send File" onClick={handleTriggerFileInput}>
+          <button className="action-btn desktop-only" title="Send File" onClick={handleTriggerFileInput}>
             📎
+          </button>
+          <button
+            className="action-btn mobile-menu-btn"
+            title="More Options"
+            onClick={() => setShowMobileMenu((prev) => !prev)}
+          >
+            ⋮
           </button>
         </div>
       </header>
+
+      {/* Mobile Overflow Bottom Sheet */}
+      {showMobileMenu && (
+        <div className="mobile-menu-backdrop" onClick={() => setShowMobileMenu(false)}>
+          <div className="mobile-menu-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="sheet-drag-handle" />
+            <h4 style={{ fontSize: '15px', fontWeight: 700, marginBottom: '14px' }}>Conversation Menu</h4>
+            <div className="sheet-options-list">
+              <button
+                className="sheet-option-item"
+                onClick={() => {
+                  setShowMobileMenu(false);
+                  setShowSearch(true);
+                }}
+              >
+                <span>🔍</span> Search in Chat
+              </button>
+              <button
+                className="sheet-option-item"
+                onClick={() => {
+                  setShowMobileMenu(false);
+                  setShowGallery(true);
+                }}
+              >
+                <span>🖼️</span> Shared Media & Documents
+              </button>
+              <button
+                className="sheet-option-item"
+                onClick={() => {
+                  setShowMobileMenu(false);
+                  handleTriggerFileInput();
+                }}
+              >
+                <span>📁</span> Send File / Attachments
+              </button>
+              {group && (
+                <button
+                  className="sheet-option-item"
+                  onClick={() => {
+                    setShowMobileMenu(false);
+                    setShowMembersDrawer(true);
+                  }}
+                >
+                  <span>👥</span> View Group Members ({group.members.length})
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* In-Chat Search Bar */}
       {showSearch && (
