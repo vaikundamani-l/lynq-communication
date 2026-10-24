@@ -109,6 +109,9 @@ export class LynqDaemon extends EventEmitter {
     this.signalingServer = new SignalingServer({
       port: signalingPort,
       host: '0.0.0.0',
+      authorizer: (senderId: string, recipientId: string, type: string) => {
+        return this.authorizeMessage(senderId, recipientId, type);
+      },
     });
 
     this.udpDiscovery = new UdpDiscovery({
@@ -354,6 +357,48 @@ export class LynqDaemon extends EventEmitter {
     } catch (err) {
       console.warn('Error handling incoming envelope in daemon:', err);
     }
+  }
+
+  private authorizeMessage(senderId: string, recipientId: string, type: string): boolean {
+    // 1. Local daemon user is always authorized to send
+    if (senderId === this.profile.uid) {
+      return true;
+    }
+
+    // 2. Incoming messages targeting this daemon
+    if (recipientId === this.profile.uid) {
+      // Protocol negotiation, signaling, and delivery acknowledgements are permitted
+      if (
+        type === 'ping' ||
+        type === 'msg:ack' ||
+        type === 'msg:read' ||
+        type.startsWith('pairing:') ||
+        type.startsWith('webrtc:') ||
+        type.startsWith('call:') ||
+        type.startsWith('transfer:')
+      ) {
+        return true;
+      }
+
+      // Check contact repository
+      const contact = this.contactRepo.getContact(senderId);
+      if (contact) {
+        return true;
+      }
+
+      // Drop unauthorized private message injections from unknown peers
+      return false;
+    }
+
+    // 3. Broadcast presence announcements
+    if (recipientId === '*') {
+      return type === 'presence:update';
+    }
+
+    // 4. Third-party transit: permit only if both peers are recognized contacts
+    const senderContact = this.contactRepo.getContact(senderId);
+    const recipientContact = this.contactRepo.getContact(recipientId);
+    return !!(senderContact && recipientContact);
   }
 
   public async start(): Promise<void> {

@@ -30,7 +30,13 @@ export type SignalingType =
   | 'transfer:reject'
   | 'transfer:chunk'
   | 'transfer:ack'
+  | 'transfer:chunk_ack'
+  | 'transfer:complete'
   | 'transfer:cancel'
+  // Authentication & Error
+  | 'auth:register'
+  | 'auth:response'
+  | 'error'
   // Calling
   | 'call:invite'
   | 'call:ring'

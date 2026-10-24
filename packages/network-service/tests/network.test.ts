@@ -250,6 +250,146 @@ describe('@lynq/network-service tests', () => {
       expect(violationFired).toBe(true);
       clientWs.close();
     });
+
+    it('rejects unauthenticated clients when authenticator is configured and token is invalid', async () => {
+      const authPort = 19447;
+      const secureServer = new SignalingServer({
+        port: authPort,
+        requireAuth: true,
+        authenticator: (auth) => {
+          return auth.token === 'VALID_SECRET_TOKEN';
+        },
+      });
+      await secureServer.start();
+
+      let authFailedFired = false;
+      secureServer.on('securityViolation', (v) => {
+        if (v.type === 'auth_failed') authFailedFired = true;
+      });
+
+      const untrustedWs = new WebSocket(`ws://127.0.0.1:${authPort}`);
+      await new Promise((r) => untrustedWs.on('open', r));
+
+      const errorPromise = new Promise<any>((resolve) => {
+        untrustedWs.on('message', (data) => {
+          resolve(JSON.parse(data.toString()));
+        });
+      });
+
+      // Try registering with an invalid token
+      untrustedWs.send(
+        JSON.stringify({
+          id: generateUUID(),
+          type: 'auth:register',
+          senderId: 'mallory',
+          recipientId: 'server',
+          timestamp: Date.now(),
+          payload: { token: 'INVALID_TOKEN' },
+        })
+      );
+
+      const errResp = await errorPromise;
+      expect(errResp.payload?.code).toBe('AUTH_FAILED');
+      expect(authFailedFired).toBe(true);
+
+      untrustedWs.close();
+      await secureServer.stop();
+    });
+
+    it('rejects presence impersonation when peer tries to broadcast presence for a different UID', async () => {
+      const clientWs = new WebSocket(`ws://127.0.0.1:${testPort}`);
+      await new Promise((r) => clientWs.on('open', r));
+
+      // Authenticate/bind connection as 'alice'
+      clientWs.send(
+        JSON.stringify({
+          id: generateUUID(),
+          type: 'ping',
+          senderId: 'alice',
+          recipientId: 'server',
+          timestamp: Date.now(),
+          payload: null,
+        })
+      );
+      await new Promise((r) => setTimeout(r, 50));
+
+      let presenceSpoofingFired = false;
+      server.on('securityViolation', (v) => {
+        if (v.type === 'presence_spoofing') {
+          presenceSpoofingFired = true;
+          expect(v.boundUid).toBe('alice');
+          expect(v.attemptedUid).toBe('bob');
+        }
+      });
+
+      // Alice tries to update presence claiming to be 'bob'
+      clientWs.send(
+        JSON.stringify({
+          id: generateUUID(),
+          type: 'presence:update',
+          senderId: 'alice',
+          recipientId: '*',
+          timestamp: Date.now(),
+          payload: { uid: 'bob', username: 'BobImpersonated', status: 'online' },
+        })
+      );
+      await new Promise((r) => setTimeout(r, 80));
+
+      expect(presenceSpoofingFired).toBe(true);
+      clientWs.close();
+    });
+
+    it('fails closed when authorizer is missing in production environment', async () => {
+      const origEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        const prodPort = 19448;
+        const prodServer = new SignalingServer({ port: prodPort });
+        await prodServer.start();
+
+        const client1 = new WebSocket(`ws://127.0.0.1:${prodPort}`);
+        const client2 = new WebSocket(`ws://127.0.0.1:${prodPort}`);
+        await Promise.all([
+          new Promise((r) => client1.on('open', r)),
+          new Promise((r) => client2.on('open', r)),
+        ]);
+
+        // Connect
+        client1.send(JSON.stringify({ id: generateUUID(), type: 'ping', senderId: 'u1', recipientId: 'server', timestamp: Date.now(), payload: null }));
+        client2.send(JSON.stringify({ id: generateUUID(), type: 'ping', senderId: 'u2', recipientId: 'server', timestamp: Date.now(), payload: null }));
+        await new Promise((r) => setTimeout(r, 50));
+
+        const errorPromise = new Promise<any>((resolve) => {
+          client1.on('message', (d) => {
+            const parsed = JSON.parse(d.toString());
+            if (parsed.type === 'error' && parsed.payload?.code === 'UNAUTHORIZED_RECIPIENT') {
+              resolve(parsed);
+            }
+          });
+        });
+
+        // Client 1 attempts to message Client 2 without configured authorizer
+        client1.send(
+          JSON.stringify({
+            id: generateUUID(),
+            type: 'msg:send',
+            senderId: 'u1',
+            recipientId: 'u2',
+            timestamp: Date.now(),
+            payload: { text: 'Unauthorized in production' },
+          })
+        );
+
+        const errResp = await errorPromise;
+        expect(errResp.payload?.code).toBe('UNAUTHORIZED_RECIPIENT');
+
+        client1.close();
+        client2.close();
+        await prodServer.stop();
+      } finally {
+        process.env.NODE_ENV = origEnv;
+      }
+    });
   });
 
   describe('PairingManager', () => {

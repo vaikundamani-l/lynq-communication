@@ -76,6 +76,12 @@ export const FileTransferItem: React.FC<FileTransferItemProps> = ({ transfer, on
           </button>
         )}
 
+        {transfer.status === 'pending_approval' && (
+          <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 600 }}>
+            ⏳ Pending
+          </span>
+        )}
+
         {transfer.status === 'completed' && (
           <span style={{ fontSize: '12px', color: 'var(--status-online)', fontWeight: 600 }}>
             ✓ Complete

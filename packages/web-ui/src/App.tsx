@@ -24,40 +24,33 @@ import { SettingsModal } from './components/SettingsModal';
 import { DiagnosticsModal } from './components/DiagnosticsModal';
 import { NotificationService } from './services/NotificationService';
 import { RecordedVoiceData } from './services/VoiceRecorderService';
+import { safeStorage } from './services/SafeStorage';
 import './styles/theme.css';
 
 export const App: React.FC = () => {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [activeTab, setActiveTab] = useState<NavTab>('chats');
   const [currentUserId] = useState(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const saved = window.localStorage.getItem('lynq_uid');
-      if (saved) return saved;
-      const newUid = 'user_' + generateUUID().slice(0, 8);
-      window.localStorage.setItem('lynq_uid', newUid);
-      return newUid;
-    }
-    return 'user_' + generateUUID().slice(0, 8);
+    const saved = safeStorage.getItem('lynq_uid');
+    if (saved) return saved;
+    const newUid = 'user_' + generateUUID().slice(0, 8);
+    safeStorage.setItem('lynq_uid', newUid);
+    return newUid;
   });
 
   const [username, setUsernameState] = useState(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const saved = window.localStorage.getItem('lynq_username');
-      if (saved) return saved;
-      const isMobile =
-        typeof navigator !== 'undefined' && /android|iphone|ipad|mobile/i.test(navigator.userAgent);
-      const defaultName = isMobile ? 'Mobile Phone' : 'Ubuntu Laptop';
-      window.localStorage.setItem('lynq_username', defaultName);
-      return defaultName;
-    }
-    return 'Ubuntu Laptop';
+    const saved = safeStorage.getItem('lynq_username');
+    if (saved) return saved;
+    const isMobile =
+      typeof navigator !== 'undefined' && /android|iphone|ipad|mobile/i.test(navigator.userAgent);
+    const defaultName = isMobile ? 'Mobile Phone' : 'Ubuntu Laptop';
+    safeStorage.setItem('lynq_username', defaultName);
+    return defaultName;
   });
 
   const getDefaultDownloadPath = () => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const saved = window.localStorage.getItem('lynq_download_path');
-      if (saved) return saved;
-    }
+    const saved = safeStorage.getItem('lynq_download_path');
+    if (saved) return saved;
     const isWindows =
       typeof navigator !== 'undefined' &&
       /win/i.test(navigator.userAgent || (navigator as any).platform || '');
@@ -68,9 +61,7 @@ export const App: React.FC = () => {
 
   const setDownloadPath = (newPath: string) => {
     setDownloadPathState(newPath);
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.setItem('lynq_download_path', newPath);
-    }
+    safeStorage.setItem('lynq_download_path', newPath);
   };
   const [myToken] = useState(() => generatePairingToken());
   const [isPairingOpen, setIsPairingOpen] = useState(false);
@@ -86,54 +77,23 @@ export const App: React.FC = () => {
   const [callEngine, setCallEngine] = useState<CallSessionEngine | null>(null);
   const [notificationService] = useState(() => new NotificationService());
 
-  // Persistent contacts from localStorage
+  // Persistent contacts from SafeStorage
   const [contacts, setContacts] = useState<Contact[]>(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const saved = window.localStorage.getItem('lynq_contacts');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) {
-            return parsed.filter(
-              (c: Contact) => c && c.uid && c.uid !== 'peer_node_1' && c.uid !== 'peer_node_2'
-            );
-          }
-        } catch {}
-      }
-    }
-    return [];
+    return safeStorage
+      .getJSON<Contact[]>('lynq_contacts', [], (val) => Array.isArray(val))
+      .filter((c: Contact) => c && c.uid && c.uid !== 'peer_node_1' && c.uid !== 'peer_node_2');
   });
 
-  // Persistent groups from localStorage
+  // Persistent groups from SafeStorage
   const [groups, setGroups] = useState<Group[]>(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const saved = window.localStorage.getItem('lynq_groups');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) return parsed;
-        } catch {}
-      }
-    }
-    return [];
+    return safeStorage.getJSON<Group[]>('lynq_groups', [], (val) => Array.isArray(val));
   });
 
-  // Persistent messages from localStorage
+  // Persistent messages from SafeStorage
   const [messages, setMessages] = useState<Message[]>(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const saved = window.localStorage.getItem('lynq_messages');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) {
-            return parsed.filter(
-              (m: Message) => m.senderId !== 'peer_node_1' && m.receiverId !== 'peer_node_1'
-            );
-          }
-        } catch {}
-      }
-    }
-    return [];
+    return safeStorage
+      .getJSON<Message[]>('lynq_messages', [], (val) => Array.isArray(val))
+      .filter((m: Message) => m && m.senderId !== 'peer_node_1' && m.receiverId !== 'peer_node_1');
   });
 
   // Active chat selection
@@ -220,37 +180,19 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  // Sync contacts to localStorage safely
+  // Sync contacts to SafeStorage
   useEffect(() => {
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem('lynq_contacts', JSON.stringify(contacts));
-      }
-    } catch (e) {
-      console.warn('Failed to persist contacts to localStorage:', e);
-    }
+    safeStorage.setJSON('lynq_contacts', contacts);
   }, [contacts]);
 
-  // Sync groups to localStorage safely
+  // Sync groups to SafeStorage
   useEffect(() => {
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem('lynq_groups', JSON.stringify(groups));
-      }
-    } catch (e) {
-      console.warn('Failed to persist groups to localStorage:', e);
-    }
+    safeStorage.setJSON('lynq_groups', groups);
   }, [groups]);
 
-  // Sync messages to localStorage safely
+  // Sync messages to SafeStorage
   useEffect(() => {
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem('lynq_messages', JSON.stringify(messages.slice(-500)));
-      }
-    } catch (e) {
-      console.warn('Failed to persist messages to localStorage:', e);
-    }
+    safeStorage.setJSON('lynq_messages', messages.slice(-500));
   }, [messages]);
 
   // Automatically mark unread messages as read when contact is opened
@@ -276,9 +218,7 @@ export const App: React.FC = () => {
 
   const setUsername = (newName: string) => {
     setUsernameState(newName);
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.setItem('lynq_username', newName);
-    }
+    safeStorage.setItem('lynq_username', newName);
     client?.updateUsername(newName);
   };
 
@@ -344,7 +284,7 @@ export const App: React.FC = () => {
           return [...prev, newMsg];
         });
 
-        // Track incoming file in active transfers
+        // Track incoming file in active transfers as an offered/pending transfer
         if (newMsg.type === 'file' && newMsg.fileMetadata) {
           const incomingTransferRecord: FileTransfer = {
             transferId: newMsg.fileMetadata.fileId || newMsg.id,
@@ -352,19 +292,18 @@ export const App: React.FC = () => {
             fileName: newMsg.fileMetadata.fileName,
             fileSize: newMsg.fileMetadata.fileSize,
             mimeType: newMsg.fileMetadata.mimeType || 'application/octet-stream',
-            sha256Hash: newMsg.fileMetadata.sha256Hash || 'sha256_verified',
+            sha256Hash: newMsg.fileMetadata.sha256Hash || '',
             chunkSize: 2 * 1024 * 1024,
             totalChunks: Math.ceil((newMsg.fileMetadata.fileSize || 1) / (2 * 1024 * 1024)),
-            transferredChunks: Math.ceil((newMsg.fileMetadata.fileSize || 1) / (2 * 1024 * 1024)),
-            transferredBytes: newMsg.fileMetadata.fileSize,
+            transferredChunks: 0,
+            transferredBytes: 0,
             direction: 'incoming',
             senderId: newMsg.senderId,
             receiverId: newMsg.receiverId,
-            status: 'completed',
-            speedBps: 240 * 1024 * 1024,
+            status: 'pending_approval',
+            speedBps: 0,
             etaSeconds: 0,
             startedAt: newMsg.timestamp,
-            completedAt: Date.now(),
           };
           setActiveTransfers((prev) => {
             if (prev.some((t) => t.transferId === incomingTransferRecord.transferId)) return prev;

@@ -66,9 +66,10 @@ describe('FileTransferEngine (P2P Streaming, Chunking & Verification)', () => {
     // Sender streams outgoing chunks
     await senderEngine.startStreamingOutgoing(sendTransfer.transferId, mockTransport);
     expect(transmittedChunks).toHaveLength(3);
-    expect(sendTransfer.status).toBe('completed');
+    // Sender must NOT report completed before receiver confirmation
+    expect(sendTransfer.status).toBe('transferring');
 
-    // Receiver processes incoming chunks
+    // Receiver processes incoming chunks with two-way signaling confirmation
     let completedEventFired = false;
     let verifiedFileData: Uint8Array | null = null;
 
@@ -77,14 +78,29 @@ describe('FileTransferEngine (P2P Streaming, Chunking & Verification)', () => {
       verifiedFileData = fileData;
     });
 
+    const receiverTransport: TransferTransport = {
+      sendData: (type: string, payload: unknown) => {
+        if (type === 'transfer:chunk_ack') {
+          const { transferId, chunkIndex } = payload as { transferId: string; chunkIndex: number };
+          senderEngine.handleChunkAck(transferId, chunkIndex);
+        } else if (type === 'transfer:complete') {
+          const { transferId, success, error } = payload as { transferId: string; success: boolean; error?: string };
+          senderEngine.handleTransferConfirmation(transferId, success, error);
+        }
+        return true;
+      },
+    };
+
     for (const chunk of transmittedChunks) {
-      await receiverEngine.handleIncomingChunk(chunk);
+      await receiverEngine.handleIncomingChunk(chunk, receiverTransport);
     }
 
     expect(completedEventFired).toBe(true);
     expect(recvTransfer.status).toBe('completed');
     expect(verifiedFileData).not.toBeNull();
     expect(verifiedFileData?.length).toBe(fileBytes.length);
+    // Sender is now completed after receiver confirmation
+    expect(sendTransfer.status).toBe('completed');
   });
 
   it('detects tampering and rejects corrupted file transfers', async () => {
@@ -207,6 +223,7 @@ describe('FileTransferEngine (P2P Streaming, Chunking & Verification)', () => {
 
     // Simulate completion after 3 chunks for testing
     recvTransfer.totalChunks = 3;
+    recvTransfer.fileSize = 3 * sampleChunk.length;
 
     // Stream 3 chunks to verify
     for (let i = 0; i < 3; i++) {
@@ -417,5 +434,146 @@ describe('FileTransferEngine (P2P Streaming, Chunking & Verification)', () => {
     expect(failedEvent).toBe(true);
     expect(transfer.status).toBe('failed');
     expect(transfer.error).toContain('timed out');
+  });
+
+  it('handles chunk retries and failure on retry exhaustion when ACK is missing', async () => {
+    const senderEngine = new FileTransferEngine('alice');
+    const { transfer } = await senderEngine.createTransferOffer(
+      {
+        name: 'retry_test.bin',
+        size: 200,
+        type: 'application/octet-stream',
+        data: new Uint8Array(200),
+        chunkSize: 100,
+      },
+      'bob'
+    );
+
+    let attempts = 0;
+    const droppingTransport: TransferTransport = {
+      sendData: (type: string) => {
+        if (type === 'transfer:chunk') {
+          attempts++;
+        }
+        return true;
+      },
+    };
+
+    let failedEventFired = false;
+    senderEngine.on('transferFailed', () => {
+      failedEventFired = true;
+    });
+
+    // Start streaming with waitForAcks enabled, 1 retry, 20ms timeout
+    await senderEngine.startStreamingOutgoing(transfer.transferId, droppingTransport, {
+      waitForAcks: true,
+      maxRetries: 1,
+      ackTimeoutMs: 20,
+    });
+
+    expect(failedEventFired).toBe(true);
+    expect(transfer.status).toBe('failed');
+    expect(transfer.error).toContain('unacknowledged after 1 retries');
+    expect(attempts).toBeGreaterThanOrEqual(2); // Initial send + at least 1 retry
+  });
+
+  it('handles duplicate acknowledgements without double-counting bytes on sender', async () => {
+    const senderEngine = new FileTransferEngine('alice');
+    const { transfer } = await senderEngine.createTransferOffer(
+      {
+        name: 'dup_ack.bin',
+        size: 300,
+        type: 'application/octet-stream',
+        data: new Uint8Array(300),
+        chunkSize: 100,
+      },
+      'bob'
+    );
+
+    // Initial ACK for chunk 0
+    senderEngine.handleChunkAck(transfer.transferId, 0);
+    expect(transfer.transferredChunks).toBe(1);
+    expect(transfer.transferredBytes).toBe(100);
+
+    // Duplicate ACK for chunk 0
+    senderEngine.handleChunkAck(transfer.transferId, 0);
+    expect(transfer.transferredChunks).toBe(1);
+    expect(transfer.transferredBytes).toBe(100); // Must remain 100
+
+    // Duplicate ACK for chunk 0 again
+    senderEngine.handleChunkAck(transfer.transferId, 0);
+    expect(transfer.transferredBytes).toBe(100);
+
+    // Distinct ACK for chunk 1
+    senderEngine.handleChunkAck(transfer.transferId, 1);
+    expect(transfer.transferredChunks).toBe(2);
+    expect(transfer.transferredBytes).toBe(200);
+  });
+
+  it('rejects transfers when receiver encounters total file size mismatch', async () => {
+    const receiverEngine = new FileTransferEngine('bob');
+    const transferId = 'size-mismatch-id';
+    const recvTransfer = receiverEngine.handleIncomingOffer({
+      transferId,
+      fileName: 'mismatch.bin',
+      fileSize: 200,
+      chunkSize: 100,
+      totalChunks: 2,
+      senderId: 'alice',
+      sha256Hash: 'dummy',
+    });
+
+    let failedEvent = false;
+    receiverEngine.on('transferFailed', () => {
+      failedEvent = true;
+    });
+
+    // Provide 2 chunks that total 150 bytes instead of 200
+    // Chunk 0: 100 bytes
+    await receiverEngine.handleIncomingChunk({
+      transferId,
+      chunkIndex: 0,
+      totalChunks: 2,
+      data: Buffer.from(new Uint8Array(100)).toString('base64'),
+    });
+
+    // Chunk 1: only 50 bytes (expected 100)
+    await receiverEngine.handleIncomingChunk({
+      transferId,
+      chunkIndex: 1,
+      totalChunks: 2,
+      data: Buffer.from(new Uint8Array(50)).toString('base64'),
+    });
+
+    expect(failedEvent).toBe(true);
+    expect(recvTransfer.status).toBe('failed');
+    expect(recvTransfer.error).toContain('Final chunk length');
+  });
+
+  it('emits exactly one terminal completion event and ignores duplicate confirmations', async () => {
+    const senderEngine = new FileTransferEngine('alice');
+    const { transfer } = await senderEngine.createTransferOffer(
+      {
+        name: 'single_event.bin',
+        size: 100,
+        type: 'application/octet-stream',
+        data: new Uint8Array(100),
+      },
+      'bob'
+    );
+
+    let completionEventsCount = 0;
+    senderEngine.on('transferCompleted', () => {
+      completionEventsCount++;
+    });
+
+    senderEngine.handleTransferConfirmation(transfer.transferId, true);
+    // Duplicate confirmation
+    senderEngine.handleTransferConfirmation(transfer.transferId, true);
+    // Late failure confirmation
+    senderEngine.handleTransferConfirmation(transfer.transferId, false, 'late error');
+
+    expect(completionEventsCount).toBe(1);
+    expect(transfer.status).toBe('completed');
   });
 });

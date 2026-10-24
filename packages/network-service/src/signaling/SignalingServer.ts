@@ -2,11 +2,19 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { EventEmitter } from 'node:events';
 import { SignalingEnvelope, generateUUID, RateLimiter } from '@lynq/core';
 
+export interface SignalingAuthContext {
+  uid: string;
+  token?: string;
+  deviceId?: string;
+}
+
 export interface SignalingServerOptions {
   port: number;
   host?: string;
   maxPayloadBytes?: number;
   rateLimitPerSec?: number;
+  requireAuth?: boolean;
+  authenticator?: (auth: SignalingAuthContext, ws: WebSocket) => boolean | Promise<boolean>;
   authorizer?: (senderId: string, recipientId: string, envelopeType: string) => boolean;
 }
 
@@ -82,7 +90,7 @@ export class SignalingServer extends EventEmitter {
   private handleConnection(ws: WebSocket): void {
     let clientUid: string | null = null;
 
-    ws.on('message', (rawData) => {
+    ws.on('message', async (rawData) => {
       try {
         const rawStr = rawData.toString('utf8');
         if (rawStr.length > this.maxPayloadBytes) {
@@ -146,6 +154,67 @@ export class SignalingServer extends EventEmitter {
             return;
           }
 
+          // Enforce authentication if authenticator or requireAuth is configured
+          if (this.options.authenticator || this.options.requireAuth) {
+            if (!this.options.authenticator) {
+              // Secure default: if requireAuth is true but no authenticator provided, reject
+              this.emit('securityViolation', {
+                type: 'auth_failed',
+                senderId: candidateUid,
+                reason: 'Authentication required but no authenticator configured',
+              });
+              try {
+                ws.send(
+                  JSON.stringify({
+                    id: generateUUID(),
+                    type: 'error',
+                    senderId: 'server',
+                    recipientId: candidateUid,
+                    timestamp: Date.now(),
+                    payload: {
+                      code: 'AUTH_REQUIRED',
+                      message: 'Authentication required but no authenticator is configured on server',
+                    },
+                  })
+                );
+                ws.close(4001, 'Authentication required');
+              } catch {}
+              return;
+            }
+
+            const token = (envelope.payload as any)?.token;
+            const deviceId = (envelope.payload as any)?.deviceId;
+            const isAuth = await this.options.authenticator(
+              { uid: candidateUid, token, deviceId },
+              ws
+            );
+
+            if (!isAuth) {
+              this.emit('securityViolation', {
+                type: 'auth_failed',
+                senderId: candidateUid,
+                reason: 'Invalid or missing authentication credentials',
+              });
+              try {
+                ws.send(
+                  JSON.stringify({
+                    id: generateUUID(),
+                    type: 'error',
+                    senderId: 'server',
+                    recipientId: candidateUid,
+                    timestamp: Date.now(),
+                    payload: {
+                      code: 'AUTH_FAILED',
+                      message: 'Authentication failed: invalid token or credentials',
+                    },
+                  })
+                );
+                ws.close(4003, 'Authentication failed');
+              } catch {}
+              return;
+            }
+          }
+
           const existingWs = this.clients.get(candidateUid);
           if (existingWs && existingWs !== ws && existingWs.readyState === WebSocket.OPEN) {
             // Prevent takeover of an already connected peer's identity
@@ -177,6 +246,23 @@ export class SignalingServer extends EventEmitter {
           clientUid = candidateUid;
           this.clients.set(clientUid, ws);
           this.emit('clientConnected', clientUid);
+
+          // If this was an explicit auth:register handshake, acknowledge it
+          if (envelope.type === 'auth:register') {
+            try {
+              ws.send(
+                JSON.stringify({
+                  id: generateUUID(),
+                  type: 'auth:response',
+                  senderId: 'server',
+                  recipientId: clientUid,
+                  timestamp: Date.now(),
+                  payload: { authenticated: true, uid: clientUid },
+                })
+              );
+            } catch {}
+            return;
+          }
         } else {
           // Connection is already bound to clientUid. Enforce that senderId matches exactly!
           if (envelope.senderId !== clientUid) {
@@ -265,56 +351,100 @@ export class SignalingServer extends EventEmitter {
     // Handle peer presence announcement & sync
     if (type === 'presence:update') {
       const peerInfo = envelope.payload as any;
-      if (peerInfo && envelope.senderId) {
-        this.clientMetadata.set(envelope.senderId, peerInfo);
+      if (!peerInfo || typeof peerInfo !== 'object') {
+        this.emit('securityViolation', {
+          type: 'invalid_presence',
+          reason: 'Malformed presence payload',
+        });
+        return;
+      }
 
-        // 1. Announce this peer to all other connected clients
-        this.broadcast(
-          {
+      // Presence spoofing prevention: peer cannot advertise presence for another UID
+      if (peerInfo.uid && peerInfo.uid !== envelope.senderId) {
+        this.emit('securityViolation', {
+          type: 'presence_spoofing',
+          boundUid: envelope.senderId,
+          attemptedUid: peerInfo.uid,
+          reason: 'Cannot update presence metadata on behalf of another user identity',
+        });
+        return;
+      }
+
+      // Enforce authenticated identity in presence payload
+      peerInfo.uid = envelope.senderId;
+      this.clientMetadata.set(envelope.senderId, peerInfo);
+
+      // 1. Announce this peer to all other connected clients
+      this.broadcast(
+        {
+          id: generateUUID(),
+          type: 'presence:update',
+          senderId: envelope.senderId,
+          recipientId: '*',
+          timestamp: Date.now(),
+          payload: peerInfo,
+        },
+        envelope.senderId
+      );
+
+      // 2. Send the newly connected client the directory of all existing connected peers
+      const currentPeers = Array.from(this.clientMetadata.entries())
+        .filter(([uid]) => uid !== envelope.senderId)
+        .map(([_, info]) => info);
+
+      if (currentPeers.length > 0) {
+        senderWs.send(
+          JSON.stringify({
             id: generateUUID(),
-            type: 'presence:update',
-            senderId: envelope.senderId,
-            recipientId: '*',
+            type: 'presence:list',
+            senderId: 'server',
+            recipientId: envelope.senderId,
             timestamp: Date.now(),
-            payload: peerInfo,
-          },
-          envelope.senderId
+            payload: currentPeers,
+          })
         );
-
-        // 2. Send the newly connected client the directory of all existing connected peers
-        const currentPeers = Array.from(this.clientMetadata.entries())
-          .filter(([uid]) => uid !== envelope.senderId)
-          .map(([_, info]) => info);
-
-        if (currentPeers.length > 0) {
-          senderWs.send(
-            JSON.stringify({
-              id: generateUUID(),
-              type: 'presence:list',
-              senderId: 'server',
-              recipientId: envelope.senderId,
-              timestamp: Date.now(),
-              payload: currentPeers,
-            })
-          );
-        }
       }
       return;
     }
 
-    // Enforce recipient authorization if authorizer callback configured
-    if (
-      this.options.authorizer &&
-      recipientId !== 'server' &&
-      recipientId !== '*'
-    ) {
-      const allowed = this.options.authorizer(envelope.senderId, recipientId, type);
-      if (!allowed) {
+    // Enforce recipient authorization on every private-message and signaling path
+    if (recipientId !== 'server' && recipientId !== '*') {
+      if (this.options.authorizer) {
+        const allowed = this.options.authorizer(envelope.senderId, recipientId, type);
+        if (!allowed) {
+          this.emit('securityViolation', {
+            type: 'unauthorized_recipient',
+            senderId: envelope.senderId,
+            recipientId,
+            messageType: type,
+          });
+          try {
+            senderWs.send(
+              JSON.stringify({
+                id: generateUUID(),
+                type: 'error',
+                senderId: 'server',
+                recipientId: envelope.senderId,
+                timestamp: Date.now(),
+                payload: {
+                  code: 'UNAUTHORIZED_RECIPIENT',
+                  message: `Sender '${envelope.senderId}' is not authorized to communicate with recipient '${recipientId}'`,
+                },
+              })
+            );
+          } catch {
+            // ignore
+          }
+          return;
+        }
+      } else if (process.env.NODE_ENV === 'production') {
+        // Secure default: fail closed if authorizer is missing in production
         this.emit('securityViolation', {
           type: 'unauthorized_recipient',
           senderId: envelope.senderId,
           recipientId,
           messageType: type,
+          reason: 'Missing authorization policy in production environment',
         });
         try {
           senderWs.send(
@@ -326,7 +456,7 @@ export class SignalingServer extends EventEmitter {
               timestamp: Date.now(),
               payload: {
                 code: 'UNAUTHORIZED_RECIPIENT',
-                message: `Sender '${envelope.senderId}' is not authorized to communicate with recipient '${recipientId}'`,
+                message: 'No authorization policy configured for production relay',
               },
             })
           );
