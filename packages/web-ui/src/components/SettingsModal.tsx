@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { CloseIcon, SettingsIcon, ActivityIcon, SunIcon, MoonIcon } from './Icons';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -9,6 +10,9 @@ interface SettingsModalProps {
   onToggleTheme: () => void;
   downloadPath: string;
   onUpdateDownloadPath: (path: string) => void;
+  requireApproval?: boolean;
+  soundChimes?: boolean;
+  onUpdatePreferences?: (prefs: { requireApproval: boolean; soundChimes: boolean }) => void;
   onOpenDiagnostics?: () => void;
 }
 
@@ -21,30 +25,72 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleTheme,
   downloadPath,
   onUpdateDownloadPath,
+  requireApproval = true,
+  soundChimes = true,
+  onUpdatePreferences,
   onOpenDiagnostics,
 }) => {
   const [name, setName] = useState(username);
   const [path, setPath] = useState(downloadPath);
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  const [autoDownload, setAutoDownload] = useState(false);
+  const [requireApprovalState, setRequireApprovalState] = useState(requireApproval);
+  const [soundChimesState, setSoundChimesState] = useState(soundChimes);
   const [isSaved, setIsSaved] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setName(username);
+      setPath(downloadPath);
+      setRequireApprovalState(requireApproval);
+      setSoundChimesState(soundChimes);
+    }
+  }, [isOpen, username, downloadPath, requireApproval, soundChimes]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
   const handleSave = () => {
     if (name.trim()) onUpdateUsername(name.trim());
     if (path.trim()) onUpdateDownloadPath(path.trim());
+    onUpdatePreferences?.({
+      requireApproval: requireApprovalState,
+      soundChimes: soundChimesState,
+    });
     setIsSaved(true);
-    setTimeout(() => setIsSaved(false), 2000);
+    setTimeout(() => {
+      setIsSaved(false);
+      onClose();
+    }, 1000);
   };
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-card" style={{ width: '520px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-dialog-title"
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: '520px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
+      >
         <div className="modal-header">
-          <h3 className="modal-title">Settings & Preferences</h3>
-          <button className="close-btn" onClick={onClose}>
-            ✕
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <SettingsIcon size={20} style={{ color: 'var(--accent)' }} />
+            <h3 id="settings-dialog-title" className="modal-title">
+              Settings & Preferences
+            </h3>
+          </div>
+          <button className="close-btn" onClick={onClose} aria-label="Close settings dialog">
+            <CloseIcon size={18} />
           </button>
         </div>
 
@@ -52,12 +98,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* User Profile */}
           <div className="settings-section">
             <h4 style={{ fontSize: '13px', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-              👤 User Profile & Node Identity
+              User Profile & Node Identity
             </h4>
-            <label style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
-              Display Name (Visible on LAN)
+            <label
+              htmlFor="settings-username"
+              style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}
+            >
+              Display Name (Visible to peers on LAN)
             </label>
             <input
+              id="settings-username"
               type="text"
               className="modal-input"
               value={name}
@@ -69,13 +119,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* Download & Storage Configuration */}
           <div className="settings-section">
             <h4 style={{ fontSize: '13px', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-              📁 Storage & Download Location
+              Storage & Download Location
             </h4>
-            <label style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+            <label
+              htmlFor="settings-download-path"
+              style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}
+            >
               Default Download Directory
             </label>
             <div style={{ display: 'flex', gap: '8px' }}>
               <input
+                id="settings-download-path"
                 type="text"
                 className="modal-input"
                 value={path}
@@ -86,7 +140,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  const isWin = typeof navigator !== 'undefined' && /win/i.test(navigator.userAgent || (navigator as any).platform || '');
+                  const isWin =
+                    typeof navigator !== 'undefined' &&
+                    /win/i.test(navigator.userAgent || (navigator as any).platform || '');
                   setPath(isWin ? 'C:\\Users\\Public\\Downloads\\LYNQ' : '~/Downloads/LYNQ');
                 }}
                 style={{
@@ -103,17 +159,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </button>
             </div>
 
-            <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ marginTop: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
-                <div style={{ fontSize: '13px', fontWeight: 600 }}>Require Approval for Incoming Files</div>
+                <label
+                  htmlFor="settings-require-approval"
+                  style={{ fontSize: '13px', fontWeight: 600, display: 'block', cursor: 'pointer' }}
+                >
+                  Require Approval for Incoming Files
+                </label>
                 <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
                   Prevents automatic or unauthorized file downloads (Recommended)
                 </div>
               </div>
               <input
+                id="settings-require-approval"
                 type="checkbox"
-                checked={!autoDownload}
-                onChange={(e) => setAutoDownload(!e.target.checked)}
+                checked={requireApprovalState}
+                onChange={(e) => setRequireApprovalState(e.target.checked)}
                 style={{ width: '18px', height: '18px', accentColor: 'var(--accent)', cursor: 'pointer' }}
               />
             </div>
@@ -122,9 +184,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* Appearance & Sound */}
           <div className="settings-section">
             <h4 style={{ fontSize: '13px', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-              🎨 Appearance & Sound
+              Appearance & Sound
             </h4>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600 }}>Theme Mode</div>
                 <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>Currently set to {theme} theme</div>
@@ -141,21 +203,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   cursor: 'pointer',
                   fontWeight: 600,
                   color: 'var(--text-primary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
                 }}
               >
-                Switch to {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+                {theme === 'dark' ? <SunIcon size={16} /> : <MoonIcon size={16} />}
+                Switch to {theme === 'dark' ? 'Light' : 'Dark'}
               </button>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
-                <div style={{ fontSize: '13px', fontWeight: 600 }}>Message & Call Chimes</div>
-                <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>Synthesized audio tones via Web Audio API</div>
+                <label
+                  htmlFor="settings-sound-chimes"
+                  style={{ fontSize: '13px', fontWeight: 600, display: 'block', cursor: 'pointer' }}
+                >
+                  Message & Call Chimes
+                </label>
+                <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                  Synthesized audio tones via Web Audio API
+                </div>
               </div>
               <input
+                id="settings-sound-chimes"
                 type="checkbox"
-                checked={soundEnabled}
-                onChange={(e) => setSoundEnabled(e.target.checked)}
+                checked={soundChimesState}
+                onChange={(e) => setSoundChimesState(e.target.checked)}
                 style={{ width: '18px', height: '18px', accentColor: 'var(--accent)', cursor: 'pointer' }}
               />
             </div>
@@ -165,12 +239,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {onOpenDiagnostics && (
             <div className="settings-section">
               <h4 style={{ fontSize: '13px', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                📊 Diagnostics & Topology
+                Diagnostics & Topology
               </h4>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div>
                   <div style={{ fontSize: '13px', fontWeight: 600 }}>LAN Connection Diagnostics</div>
-                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>Inspect signaling, WebRTC states & active mesh peers</div>
+                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                    Inspect signaling, WebRTC states & active mesh peers
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -184,50 +260,50 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     cursor: 'pointer',
                     fontWeight: 600,
                     color: 'var(--accent)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
                   }}
                 >
+                  <ActivityIcon size={16} />
                   View Details
                 </button>
               </div>
             </div>
           )}
 
-          {/* Local-First Data Disclosure (Section 8) */}
+          {/* Local-First Data Disclosure */}
           <div
             style={{
               background: 'var(--bg-active)',
-              padding: '12px',
-              borderRadius: '8px',
+              padding: '14px',
+              borderRadius: '10px',
               fontSize: '12px',
-              lineHeight: 1.5,
+              lineHeight: 1.6,
               border: '1px solid var(--border-subtle)',
             }}
           >
-            <div style={{ fontWeight: 700, color: 'var(--accent)', marginBottom: '4px' }}>
+            <div style={{ fontWeight: 700, color: 'var(--accent)', marginBottom: '6px' }}>
               🔒 Local-First Data Storage Disclosure
             </div>
             <div style={{ color: 'var(--text-secondary)' }}>
-              • <strong>SQLite Database</strong>: <code>~/.gemini/antigravity-cli/lynq_storage.db</code> (WAL mode)<br />
-              • <strong>Cloud Storage</strong>: None. 0 bytes transmitted externally.<br />
-              • <strong>Telemetry / Analytics</strong>: Strictly disabled by design.
+              • <strong>Local SQLite Storage</strong>: Messages and contacts are encrypted and stored locally on this device.<br />
+              • <strong>External Servers</strong>: Zero cloud relay or intermediary servers. 0 bytes transmitted externally.<br />
+              • <strong>Telemetry / Analytics</strong>: Strictly disabled by design. All local mesh activity stays on your Wi-Fi.
             </div>
           </div>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
-          {isSaved && <span style={{ color: 'var(--status-online)', fontSize: '13px', alignSelf: 'center' }}>✓ Settings saved!</span>}
-          <button
-            type="button"
-            className="modal-btn secondary"
-            onClick={onClose}
-          >
+          {isSaved && (
+            <span style={{ color: 'var(--status-online)', fontSize: '13px', alignSelf: 'center', fontWeight: 600 }}>
+              ✓ Settings saved!
+            </span>
+          )}
+          <button type="button" className="modal-btn secondary" onClick={onClose}>
             Close
           </button>
-          <button
-            type="button"
-            className="modal-btn primary"
-            onClick={handleSave}
-          >
+          <button type="button" className="modal-btn primary" onClick={handleSave}>
             Save Changes
           </button>
         </div>

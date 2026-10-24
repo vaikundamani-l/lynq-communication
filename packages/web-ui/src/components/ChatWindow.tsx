@@ -4,6 +4,23 @@ import { FileTransferItem } from './FileTransferItem';
 import { VoiceMessageBubble } from './VoiceMessageBubble';
 import { VoiceRecorderService, RecordedVoiceData } from '../services/VoiceRecorderService';
 import { MediaGalleryModal } from './MediaGalleryModal';
+import {
+  ChatIcon,
+  SearchIcon,
+  LinkIcon,
+  ActivityIcon,
+  PhoneIcon,
+  VideoIcon,
+  PaperclipIcon,
+  MicIcon,
+  SendIcon,
+  CloseIcon,
+  ShieldCheckIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  TrashIcon,
+  UsersIcon,
+} from './Icons';
 
 interface ChatWindowProps {
   contact: Contact | null;
@@ -26,6 +43,9 @@ interface ChatWindowProps {
   onInitiateCall: (type: 'voice' | 'video') => void;
   onSendFile: () => void;
   onBack?: () => void;
+  onOpenPairing?: () => void;
+  onOpenCreateGroup?: () => void;
+  onOpenDiagnostics?: () => void;
   networkStatus: { connected: boolean; url: string };
 }
 
@@ -50,8 +70,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onCancelTransfer,
   onDropFiles,
   onInitiateCall,
-  onSendFile,
   onBack,
+  onOpenPairing,
+  onOpenDiagnostics,
   networkStatus,
 }) => {
   const [inputText, setInputText] = useState('');
@@ -65,12 +86,17 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [chatSearchText, setChatSearchText] = useState('');
   const [showGallery, setShowGallery] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [showTransfersDrawer, setShowTransfersDrawer] = useState(false);
 
   // Voice recording state
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
   const voiceRecorderRef = useRef<VoiceRecorderService | null>(null);
   const recordTimerRef = useRef<any>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     voiceRecorderRef.current = new VoiceRecorderService();
@@ -79,6 +105,18 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       voiceRecorderRef.current?.cancel();
     };
   }, []);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isPeerTyping]);
+
+  // Auto-resize message composer textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 140)}px`;
+    }
+  }, [inputText, editText, editingMessageId]);
 
   const startVoiceRecord = async () => {
     if (!voiceRecorderRef.current) return;
@@ -114,40 +152,68 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     setRecordSeconds(0);
   };
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isPeerTyping]);
-
   if (!contact && !group) {
     return (
-      <main className="chat-workspace">
+      <main className="chat-workspace" aria-label="Conversation workspace">
         <div className="empty-chat-state">
           <div className="empty-radar-hero">
-            <span className="hero-emoji">💬</span>
+            <ChatIcon size={40} style={{ color: 'white' }} />
           </div>
           <h2 className="empty-hero-title">LYNQ Communication</h2>
           <p className="empty-hero-desc">
-            Ultra-fast direct local-first messaging, crystal-clear voice notes, and bit-for-bit file transfers directly over your Wi-Fi.
+            Direct peer-to-peer messaging, crystal-clear voice notes, and bit-for-bit file transfers directly over your local network.
           </p>
-          <div className="empty-hints-grid">
-            <div className="hint-card">
-              <span className="hint-icon">⚡</span>
-              <h4>0.009 ms Latency</h4>
-              <p>Direct local network routing without external cloud bottlenecks</p>
-            </div>
-            <div className="hint-card">
-              <span className="hint-icon">🛡️</span>
-              <h4>Local & Private</h4>
-              <p>Zero external tracking; communications stay inside your LAN</p>
-            </div>
-            <div className="hint-card">
-              <span className="hint-icon">🚀</span>
-              <h4>250+ MB/s Transfers</h4>
-              <p>Direct streaming with bit-for-bit SHA-256 verification</p>
-            </div>
+          <div className="empty-hints-grid" style={{ maxWidth: '640px', width: '100%' }}>
+            <button
+              type="button"
+              className="empty-action-card"
+              onClick={() => {
+                const searchEl = document.querySelector<HTMLInputElement>('.search-input-wrapper input');
+                searchEl?.focus();
+              }}
+            >
+              <div style={{ color: 'var(--accent)', marginTop: '2px' }}>
+                <SearchIcon size={22} />
+              </div>
+              <div>
+                <h4 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '4px' }}>Select a Peer</h4>
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                  Choose an online peer or existing conversation from the list to start chatting.
+                </p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="empty-action-card"
+              onClick={onOpenPairing}
+            >
+              <div style={{ color: 'var(--accent)', marginTop: '2px' }}>
+                <LinkIcon size={22} />
+              </div>
+              <div>
+                <h4 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '4px' }}>Pair a Device</h4>
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                  Scan QR code or enter a 6-character code to pair with nearby phones or laptops.
+                </p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className="empty-action-card"
+              onClick={onOpenDiagnostics}
+            >
+              <div style={{ color: 'var(--accent)', marginTop: '2px' }}>
+                <ActivityIcon size={22} />
+              </div>
+              <div>
+                <h4 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '4px' }}>Network Diagnostics</h4>
+                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                  Inspect local mesh discovery, WebRTC DataChannel telemetry, and signaling.
+                </p>
+              </div>
+            </button>
           </div>
         </div>
       </main>
@@ -171,6 +237,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       }
       setEditingMessageId(null);
       setEditText('');
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
       return;
     }
 
@@ -178,11 +247,15 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       onSendMessage(inputText.trim(), replyingTo?.id);
       setInputText('');
       setReplyingTo(null);
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
       handleSend();
     } else {
       onSendTyping();
@@ -282,7 +355,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       return;
     }
 
-    // 2. Native File System Access API (supports streaming directly to disk for up to 20 GB files)
+    // 2. Native File System Access API
     if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
       try {
         const handle = await (window as any).showSaveFilePicker({
@@ -294,7 +367,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           const blob = await res.blob();
           await writable.write(blob);
         } else {
-          // Streaming direct LAN payload
           const encoder = new TextEncoder();
           const info = `LYNQ Direct LAN Transmission: ${safeName}\nSize: ${meta?.fileSize || 0} bytes\nSHA-256: ${meta?.sha256Hash || 'verified'}\nSender: ${msg.senderId}\nTimestamp: ${new Date(msg.timestamp).toISOString()}`;
           await writable.write(encoder.encode(info));
@@ -327,6 +399,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       setTimeout(() => URL.revokeObjectURL(downloadUrl!), 1500);
     }
   };
+
+  // Sort transfers so failed items are on top
+  const sortedTransfers = [...activeTransfers].sort((a, b) => {
+    const score = (t: FileTransfer) =>
+      t.status === 'failed' ? 0 : t.status === 'transferring' ? 1 : t.status === 'pending_approval' ? 2 : 3;
+    return score(a) - score(b);
+  });
 
   return (
     <main
@@ -371,10 +450,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           }}
         >
           <div style={{ textAlign: 'center', color: 'var(--accent)', fontWeight: 700, fontSize: '20px' }}>
-            📁 Drop files here to send directly to {contact?.username || group?.name || 'peer'}
+            Drop files here to send directly to {contact?.username || group?.name || 'peer'}
           </div>
         </div>
       )}
+
       {/* Top Header */}
       <header className="chat-header">
         <div className="chat-header-user">
@@ -383,6 +463,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               className="mobile-back-btn action-btn"
               onClick={onBack}
               title="Back to conversation list"
+              aria-label="Back to conversation list"
             >
               ←
             </button>
@@ -395,15 +476,24 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 background: group ? 'linear-gradient(135deg, #2563eb, #7c3aed)' : undefined,
               }}
             >
-              {group ? '👥' : initial}
+              {group ? <UsersIcon size={18} /> : initial}
             </div>
             {!group && <div className={`presence-badge ${contact?.status || 'offline'}`} />}
           </div>
           <div className="chat-header-info">
             <div className="chat-header-title">{title}</div>
-            <div className="chat-header-meta">
+            <div className="chat-header-meta" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span className="chat-header-subtitle">{subtitle}</span>
-              {!group && <span className="p2p-shield-badge desktop-only">🛡️ Direct LAN</span>}
+              <button
+                type="button"
+                className={`secure-status-pill ${networkStatus.connected ? '' : 'warning'} desktop-only`}
+                onClick={onOpenDiagnostics}
+                title="Click to view connection diagnostics"
+                aria-label="Connection security status"
+              >
+                <ShieldCheckIcon size={13} />
+                <span>{networkStatus.connected ? 'Connected securely' : 'Reconnecting...'}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -411,43 +501,70 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         <div className="chat-actions">
           {group && (
             <button
+              type="button"
               className="action-btn desktop-only"
               title="View Group Members"
+              aria-label="View Group Members"
               onClick={() => setShowMembersDrawer((prev) => !prev)}
-              style={{ width: 'auto', padding: '0 10px', fontSize: '13px', gap: '4px' }}
+              style={{ width: 'auto', padding: '0 10px', fontSize: '13px', gap: '6px' }}
             >
-              👥 Members ({group.members.length})
+              <UsersIcon size={16} />
+              <span>Members ({group.members.length})</span>
             </button>
           )}
           <button
+            type="button"
             className={`action-btn desktop-only ${showSearch ? 'active' : ''}`}
             title="Search in conversation"
+            aria-label="Search in conversation"
             onClick={() => {
               setShowSearch((prev) => !prev);
               if (showSearch) setChatSearchText('');
             }}
           >
-            🔍
+            <SearchIcon size={18} />
           </button>
           <button
+            type="button"
             className="action-btn desktop-only"
             title="Media & Files Gallery"
+            aria-label="Media & Files Gallery"
             onClick={() => setShowGallery(true)}
           >
-            🖼️
-          </button>
-          <button className="action-btn call-action-btn" title="Voice Call" onClick={() => onInitiateCall('voice')}>
-            📞
-          </button>
-          <button className="action-btn call-action-btn" title="Video Call" onClick={() => onInitiateCall('video')}>
-            📹
-          </button>
-          <button className="action-btn desktop-only" title="Send File" onClick={handleTriggerFileInput}>
-            📎
+            📁
           </button>
           <button
+            type="button"
+            className="action-btn call-action-btn"
+            title="Voice Call"
+            aria-label="Voice Call"
+            onClick={() => onInitiateCall('voice')}
+          >
+            <PhoneIcon size={18} />
+          </button>
+          <button
+            type="button"
+            className="action-btn call-action-btn"
+            title="Video Call"
+            aria-label="Video Call"
+            onClick={() => onInitiateCall('video')}
+          >
+            <VideoIcon size={18} />
+          </button>
+          <button
+            type="button"
+            className="action-btn desktop-only"
+            title="Send File"
+            aria-label="Send File"
+            onClick={handleTriggerFileInput}
+          >
+            <PaperclipIcon size={18} />
+          </button>
+          <button
+            type="button"
             className="action-btn mobile-menu-btn"
             title="More Options"
+            aria-label="More Options"
             onClick={() => setShowMobileMenu((prev) => !prev)}
           >
             ⋮
@@ -463,41 +580,48 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             <h4 style={{ fontSize: '15px', fontWeight: 700, marginBottom: '14px' }}>Conversation Menu</h4>
             <div className="sheet-options-list">
               <button
+                type="button"
                 className="sheet-option-item"
                 onClick={() => {
                   setShowMobileMenu(false);
                   setShowSearch(true);
                 }}
               >
-                <span>🔍</span> Search in Chat
+                <SearchIcon size={18} />
+                <span>Search in Chat</span>
               </button>
               <button
+                type="button"
                 className="sheet-option-item"
                 onClick={() => {
                   setShowMobileMenu(false);
                   setShowGallery(true);
                 }}
               >
-                <span>🖼️</span> Shared Media & Documents
+                <span>📁</span> Shared Media & Documents
               </button>
               <button
+                type="button"
                 className="sheet-option-item"
                 onClick={() => {
                   setShowMobileMenu(false);
                   handleTriggerFileInput();
                 }}
               >
-                <span>📁</span> Send File / Attachments
+                <PaperclipIcon size={18} />
+                <span>Send File / Attachments</span>
               </button>
               {group && (
                 <button
+                  type="button"
                   className="sheet-option-item"
                   onClick={() => {
                     setShowMobileMenu(false);
                     setShowMembersDrawer(true);
                   }}
                 >
-                  <span>👥</span> View Group Members ({group.members.length})
+                  <UsersIcon size={18} />
+                  <span>View Group Members ({group.members.length})</span>
                 </button>
               )}
             </div>
@@ -517,7 +641,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             gap: '10px',
           }}
         >
-          <span>🔍</span>
+          <SearchIcon size={16} />
           <input
             type="text"
             placeholder="Search text in this chat..."
@@ -531,6 +655,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               padding: '6px 10px',
               color: 'var(--text-primary)',
               fontSize: '13px',
+              outline: 'none',
             }}
             autoFocus
           />
@@ -540,13 +665,15 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </span>
           )}
           <button
+            type="button"
             onClick={() => {
               setShowSearch(false);
               setChatSearchText('');
             }}
-            style={{ background: 'none', border: 'none', color: 'gray', cursor: 'pointer', fontSize: '14px' }}
+            aria-label="Close search"
+            style={{ background: 'none', border: 'none', color: 'gray', cursor: 'pointer', display: 'flex' }}
           >
-            ✕
+            <CloseIcon size={16} />
           </button>
         </div>
       )}
@@ -572,44 +699,54 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </span>
           </div>
           <button
+            type="button"
             onClick={() => onPinMessage(pinnedMessage.id)}
-            style={{ background: 'none', border: 'none', color: 'gray', cursor: 'pointer' }}
+            aria-label="Unpin message"
+            style={{ background: 'none', border: 'none', color: 'gray', cursor: 'pointer', display: 'flex' }}
           >
-            ✕
+            <CloseIcon size={14} />
           </button>
         </div>
       )}
 
-      {/* Diagnostics Banner (Desktop only - mobile stays clean and uncluttered) */}
-      <div className="diagnostics-banner desktop-only">
-        <span>⚡ Direct Local Connection</span>
-        <div className="diagnostics-tags">
-          <span
-            className="tag-badge"
-            style={{ color: networkStatus.connected ? 'var(--status-online)' : 'var(--accent-warning)' }}
-          >
-            {networkStatus.connected ? 'Signaling: Connected' : 'Signaling: Reconnecting...'}
-          </span>
-          <span className="tag-badge">Transport: WebRTC DataChannel Ready</span>
-          <span className="tag-badge">
-            {group ? '🔒 Local Group' : contact?.isPaired ? '🔒 Authenticated' : '⚠️ Unpaired'}
-          </span>
-        </div>
-      </div>
-
-      {/* Active File Transfers Queue */}
+      {/* Active File Transfers Summary Bar & Collapsible Drawer */}
       {activeTransfers.length > 0 && (
-        <div style={{ padding: '8px 20px', background: 'var(--bg-card)', borderBottom: '1px solid var(--border-subtle)' }}>
-          <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '4px' }}>
-            ACTIVE P2P TRANSFERS ({activeTransfers.length})
-          </div>
-          {activeTransfers.map((t) => (
-            <FileTransferItem
-              key={t.transferId}
-              transfer={t}
-              onCancel={(id) => onCancelTransfer?.(id)}
-            />
-          ))}
+        <div className="transfers-summary-container">
+          <button
+            type="button"
+            className="transfers-summary-bar"
+            onClick={() => setShowTransfersDrawer((prev) => !prev)}
+            aria-expanded={showTransfersDrawer}
+            aria-label={`${activeTransfers.length} file transfers`}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>📦</span>
+              <span style={{ fontWeight: 600 }}>
+                {activeTransfers.length} file transfer{activeTransfers.length > 1 ? 's' : ''} in progress
+              </span>
+              {activeTransfers.some((t) => t.status === 'failed') && (
+                <span style={{ color: 'var(--accent-danger)', fontSize: '11.5px', fontWeight: 600 }}>
+                  (Failures detected)
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-muted)', fontSize: '12px' }}>
+              <span>{showTransfersDrawer ? 'Hide details' : 'View details'}</span>
+              {showTransfersDrawer ? <ChevronUpIcon size={16} /> : <ChevronDownIcon size={16} />}
+            </div>
+          </button>
+
+          {showTransfersDrawer && (
+            <div className="transfers-drawer">
+              {sortedTransfers.map((t) => (
+                <FileTransferItem
+                  key={t.transferId}
+                  transfer={t}
+                  onCancel={(id) => onCancelTransfer?.(id)}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -650,308 +787,321 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 onMouseLeave={() => setHoveredMessageId(null)}
                 style={{ position: 'relative' }}
               >
-              {/* Quick Actions Hover Palette */}
-              {isHovered && !msg.isDeleted && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: '-26px',
-                    [isOutgoing ? 'right' : 'left']: '10px',
-                    background: 'var(--bg-card)',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: '20px',
-                    padding: '2px 8px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    boxShadow: 'var(--shadow-md)',
-                    zIndex: 10,
-                  }}
-                >
-                  {QUICK_EMOJIS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      onClick={() => onReact(msg.id, emoji)}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px' }}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => setReplyingTo(msg)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', marginLeft: '4px' }}
-                    title="Reply"
-                  >
-                    ↩️
-                  </button>
-                  <button
-                    onClick={() => onForwardMessage?.(msg)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px' }}
-                    title="Forward"
-                  >
-                    ➡️
-                  </button>
-                  <button
-                    onClick={() => onPinMessage(msg.id)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px' }}
-                    title="Pin"
-                  >
-                    📌
-                  </button>
-                  {isOutgoing && (
-                    <>
-                      <button
-                        onClick={() => startEdit(msg)}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px' }}
-                        title="Edit"
-                      >
-                        ✏️
-                      </button>
-                      <button
-                        onClick={() => onDeleteMessage(msg.id)}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px' }}
-                        title="Delete"
-                      >
-                        🗑️
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-
-              <div className={`message-bubble ${isOutgoing ? 'outgoing' : 'incoming'}`}>
-                {group && !isOutgoing && (
-                  <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent)', marginBottom: '3px' }}>
-                    {msg.senderId}
-                  </div>
-                )}
-
-                {/* Replying quote preview */}
-                {replyRef && (
+                {/* Quick Actions Hover Palette */}
+                {isHovered && !msg.isDeleted && (
                   <div
                     style={{
-                      background: 'rgba(0, 0, 0, 0.15)',
-                      borderLeft: '3px solid var(--accent)',
-                      padding: '4px 8px',
-                      borderRadius: '4px',
-                      marginBottom: '6px',
-                      fontSize: '12px',
+                      position: 'absolute',
+                      top: '-26px',
+                      [isOutgoing ? 'right' : 'left']: '10px',
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border-strong)',
+                      borderRadius: '20px',
+                      padding: '2px 8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      boxShadow: 'var(--shadow-md)',
+                      zIndex: 10,
                     }}
                   >
-                    <div style={{ fontWeight: 600, color: 'var(--accent)' }}>
-                      {replyRef.senderId === currentUserId ? 'You' : (contact?.username || group?.name || 'Peer')}
-                    </div>
-                    <div style={{ opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {replyRef.content}
-                    </div>
+                    {QUICK_EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => onReact(msg.id, emoji)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px' }}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setReplyingTo(msg)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', marginLeft: '4px' }}
+                      title="Reply"
+                    >
+                      ↩️
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onForwardMessage?.(msg)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px' }}
+                      title="Forward"
+                    >
+                      ➡️
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onPinMessage(msg.id)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px' }}
+                      title="Pin"
+                    >
+                      📌
+                    </button>
+                    {isOutgoing && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => startEdit(msg)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px' }}
+                          title="Edit"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDeleteMessage(msg.id)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: 'var(--accent-danger)' }}
+                          title="Delete"
+                        >
+                          🗑️
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
 
-                {/* Message Content */}
-                {msg.type === 'voice' ? (
-                  <VoiceMessageBubble message={msg} />
-                ) : msg.type === 'file' ? (
-                  <div className="file-message-card" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {msg.fileMetadata?.localPath && msg.fileMetadata.mimeType?.startsWith('image/') && (
-                      <img
-                        src={msg.fileMetadata.localPath}
-                        alt={msg.fileMetadata.fileName || 'Shared image'}
-                        style={{
-                          maxWidth: '100%',
-                          maxHeight: '260px',
-                          borderRadius: '8px',
-                          objectFit: 'contain',
-                          cursor: 'pointer',
-                        }}
-                        onClick={() => {
-                          if (msg.fileMetadata?.localPath) {
-                            const win = window.open();
-                            win?.document.write(`<img src="${msg.fileMetadata.localPath}" style="max-width:100%" />`);
-                          }
-                        }}
-                      />
-                    )}
+                <div className={`message-bubble ${isOutgoing ? 'outgoing' : 'incoming'}`}>
+                  {/* Sender Name in Group Chat */}
+                  {group && !isOutgoing && (
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent)', marginBottom: '2px' }}>
+                      {group.members.find((m) => m.userId === msg.senderId)?.username || msg.senderId}
+                    </div>
+                  )}
+
+                  {/* Quoted Reply Preview */}
+                  {replyRef && (
                     <div
                       style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '10px',
-                        background: 'rgba(0, 0, 0, 0.2)',
-                        padding: '10px 14px',
-                        borderRadius: '10px',
-                        border: '1px solid var(--border-subtle)',
+                        background: 'rgba(0, 0, 0, 0.15)',
+                        borderLeft: '3px solid var(--accent)',
+                        borderRadius: '4px',
+                        padding: '4px 8px',
+                        marginBottom: '6px',
+                        fontSize: '11.5px',
+                        color: 'var(--text-secondary)',
                       }}
                     >
-                      <span style={{ fontSize: '26px' }}>
-                        {getFileIcon(msg.fileMetadata?.mimeType, msg.fileMetadata?.fileName)}
-                      </span>
-                      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-                        <div
+                      <span style={{ fontWeight: 600, color: 'var(--accent)' }}>
+                        {replyRef.senderId === currentUserId ? 'You' : contact?.username || group?.name || 'Peer'}:
+                      </span>{' '}
+                      {replyRef.content}
+                    </div>
+                  )}
+
+                  {/* Message Content */}
+                  {msg.type === 'voice' ? (
+                    <VoiceMessageBubble message={msg} />
+                  ) : msg.type === 'file' ? (
+                    <div className="file-message-card" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {msg.fileMetadata?.localPath && msg.fileMetadata.mimeType?.startsWith('image/') && (
+                        <img
+                          src={msg.fileMetadata.localPath}
+                          alt={msg.fileMetadata.fileName || 'Shared image'}
                           style={{
-                            fontWeight: 700,
-                            fontSize: '13.5px',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
+                            maxWidth: '100%',
+                            maxHeight: '260px',
+                            borderRadius: '8px',
+                            objectFit: 'contain',
+                            cursor: 'pointer',
                           }}
-                        >
-                          {msg.fileMetadata?.fileName || msg.content}
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                          {formatFileSize(msg.fileMetadata?.fileSize)}
-                          {msg.fileMetadata?.sha256Hash && (
-                            <span style={{ marginLeft: '6px', color: 'var(--accent)' }}>• Verified</span>
-                          )}
-                        </div>
-                      </div>
-                      <button
-                        onClick={(e) => handleDownloadFile(msg, e)}
-                        className="action-btn file-save-btn"
-                        title="Download / Save File to Disk"
+                          onClick={() => {
+                            if (msg.fileMetadata?.localPath) {
+                              const win = window.open();
+                              win?.document.write(`<img src="${msg.fileMetadata.localPath}" style="max-width:100%" />`);
+                            }
+                          }}
+                        />
+                      )}
+                      <div
                         style={{
-                          fontSize: '12.5px',
-                          padding: '6px 14px',
-                          height: 'auto',
-                          width: 'auto',
-                          borderRadius: '8px',
-                          background: 'var(--accent)',
-                          color: '#ffffff',
-                          fontWeight: 700,
                           display: 'flex',
                           alignItems: 'center',
-                          gap: '6px',
-                          cursor: 'pointer',
-                          border: 'none',
-                          boxShadow: '0 2px 8px rgba(16, 185, 129, 0.35)',
-                          flexShrink: 0,
-                        }}
-                      >
-                        ⬇️ Save
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    className="message-content"
-                    style={{
-                      fontStyle: msg.isDeleted ? 'italic' : 'normal',
-                      opacity: msg.isDeleted ? 0.7 : 1,
-                    }}
-                  >
-                    {msg.content}
-                  </div>
-                )}
-
-                {/* Reactions badge display */}
-                {msg.reactions && Object.keys(msg.reactions).length > 0 && (
-                  <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
-                    {Object.entries(msg.reactions).map(([emoji, users]) => (
-                      <span
-                        key={emoji}
-                        onClick={() => onReact(msg.id, emoji)}
-                        style={{
-                          background: 'rgba(0, 0, 0, 0.25)',
+                          gap: '10px',
+                          background: 'rgba(0, 0, 0, 0.2)',
+                          padding: '10px 14px',
                           borderRadius: '10px',
-                          padding: '1px 6px',
-                          fontSize: '11px',
-                          cursor: 'pointer',
+                          border: '1px solid var(--border-subtle)',
                         }}
                       >
-                        {emoji} {users.length > 1 ? users.length : ''}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {/* Footer: Time, Edited status, Delivery tick */}
-                <div className="message-footer">
-                  {msg.isPinned && <span style={{ fontSize: '10px' }}>📌</span>}
-                  {msg.isEdited && !msg.isDeleted && (
-                    <span style={{ fontSize: '10px', opacity: 0.7 }}>edited</span>
+                        <span style={{ fontSize: '26px' }}>
+                          {getFileIcon(msg.fileMetadata?.mimeType, msg.fileMetadata?.fileName)}
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                          <div
+                            title={msg.fileMetadata?.fileName || msg.content}
+                            style={{
+                              fontWeight: 700,
+                              fontSize: '13.5px',
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                              wordBreak: 'break-word',
+                              lineHeight: 1.3,
+                            }}
+                          >
+                            {msg.fileMetadata?.fileName || msg.content}
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                            {formatFileSize(msg.fileMetadata?.fileSize)}
+                            {msg.fileMetadata?.sha256Hash && (
+                              <span style={{ marginLeft: '6px', color: 'var(--accent)' }}>• Verified</span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => handleDownloadFile(msg, e)}
+                          className="action-btn file-save-btn"
+                          title="Download / Save File to Disk"
+                          style={{
+                            fontSize: '12.5px',
+                            padding: '6px 14px',
+                            height: 'auto',
+                            width: 'auto',
+                            borderRadius: '8px',
+                            background: 'var(--accent)',
+                            color: '#ffffff',
+                            fontWeight: 700,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            cursor: 'pointer',
+                            border: 'none',
+                            boxShadow: '0 2px 8px rgba(16, 185, 129, 0.35)',
+                            flexShrink: 0,
+                          }}
+                        >
+                          ⬇️ Save
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      className="message-content"
+                      style={{
+                        fontStyle: msg.isDeleted ? 'italic' : 'normal',
+                        opacity: msg.isDeleted ? 0.7 : 1,
+                      }}
+                    >
+                      {msg.content}
+                    </div>
                   )}
-                  <span className="message-timestamp">{formatTime(msg.timestamp)}</span>
-                  {renderStatusTicks(msg)}
+
+                  {/* Reactions badge display */}
+                  {msg.reactions && Object.keys(msg.reactions).length > 0 && (
+                    <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
+                      {Object.entries(msg.reactions).map(([emoji, users]) => (
+                        <span
+                          key={emoji}
+                          onClick={() => onReact(msg.id, emoji)}
+                          style={{
+                            background: 'rgba(0, 0, 0, 0.25)',
+                            borderRadius: '10px',
+                            padding: '1px 6px',
+                            fontSize: '11px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {emoji} {users.length > 1 ? users.length : ''}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Footer: Time, Edited status, Delivery tick */}
+                  <div className="message-footer">
+                    {msg.isPinned && <span style={{ fontSize: '10px' }}>📌</span>}
+                    {msg.isEdited && !msg.isDeleted && (
+                      <span style={{ fontSize: '10px', opacity: 0.7 }}>edited</span>
+                    )}
+                    <span className="message-timestamp">{formatTime(msg.timestamp)}</span>
+                    {renderStatusTicks(msg)}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
 
-        {/* Live typing indicator indicator */}
-        {isPeerTyping && (
-          <div className="message-bubble-row incoming">
-            <div className="message-bubble incoming" style={{ padding: '8px 14px' }}>
-              <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                {contact?.username || group?.name || 'Peer'} is typing...
-              </span>
-            </div>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Group Members Drawer */}
-      {group && showMembersDrawer && (
-        <aside
-          style={{
-            width: '240px',
-            background: 'var(--bg-card)',
-            borderLeft: '1px solid var(--border-subtle)',
-            padding: '16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h4 style={{ fontSize: '13px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-              Members ({group.members.length})
-            </h4>
-            <button
-              onClick={() => setShowMembersDrawer(false)}
-              style={{ background: 'none', border: 'none', color: 'gray', cursor: 'pointer' }}
-            >
-              ✕
-            </button>
-          </div>
-
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            {group.members.map((m) => (
-              <div
-                key={m.userId}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '8px 0',
-                  borderBottom: '1px solid var(--border-subtle)',
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: '13px', fontWeight: 600 }}>
-                    {m.username} {m.userId === currentUserId ? '(You)' : ''}
-                  </div>
-                </div>
-                <span
-                  style={{
-                    fontSize: '10px',
-                    background: m.role === 'creator' ? 'var(--accent)' : 'var(--bg-active)',
-                    color: m.role === 'creator' ? '#ffffff' : 'var(--text-secondary)',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    fontWeight: 600,
-                    textTransform: 'capitalize',
-                  }}
-                >
-                  {m.role}
+          {/* Live typing indicator */}
+          {isPeerTyping && (
+            <div className="message-bubble-row incoming">
+              <div className="message-bubble incoming" style={{ padding: '8px 14px' }}>
+                <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                  {contact?.username || group?.name || 'Peer'} is typing...
                 </span>
               </div>
-            ))}
-          </div>
-        </aside>
-      )}
-    </div>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Group Members Drawer */}
+        {group && showMembersDrawer && (
+          <aside
+            style={{
+              width: '240px',
+              background: 'var(--bg-card)',
+              borderLeft: '1px solid var(--border-subtle)',
+              padding: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h4 style={{ fontSize: '13px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                Members ({group.members.length})
+              </h4>
+              <button
+                type="button"
+                onClick={() => setShowMembersDrawer(false)}
+                aria-label="Close group members"
+                style={{ background: 'none', border: 'none', color: 'gray', cursor: 'pointer', display: 'flex' }}
+              >
+                <CloseIcon size={16} />
+              </button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {group.members.map((m) => (
+                <div
+                  key={m.userId}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 0',
+                    borderBottom: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 600 }}>
+                      {m.username} {m.userId === currentUserId ? '(You)' : ''}
+                    </div>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      background: m.role === 'creator' ? 'var(--accent)' : 'var(--bg-active)',
+                      color: m.role === 'creator' ? '#ffffff' : 'var(--text-secondary)',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      fontWeight: 600,
+                      textTransform: 'capitalize',
+                    }}
+                  >
+                    {m.role}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </aside>
+        )}
+      </div>
 
       {/* Reply Quote Banner above composer */}
       {replyingTo && (
@@ -973,10 +1123,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             <span style={{ color: 'var(--text-secondary)' }}>{replyingTo.content}</span>
           </div>
           <button
+            type="button"
             onClick={() => setReplyingTo(null)}
-            style={{ background: 'none', border: 'none', color: 'gray', cursor: 'pointer', fontSize: '14px' }}
+            aria-label="Cancel reply"
+            style={{ background: 'none', border: 'none', color: 'gray', cursor: 'pointer', display: 'flex' }}
           >
-            ✕
+            <CloseIcon size={14} />
           </button>
         </div>
       )}
@@ -996,18 +1148,20 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         >
           <span style={{ fontWeight: 600, color: 'var(--accent)' }}>Editing message</span>
           <button
+            type="button"
             onClick={() => {
               setEditingMessageId(null);
               setEditText('');
             }}
-            style={{ background: 'none', border: 'none', color: 'gray', cursor: 'pointer', fontSize: '14px' }}
+            aria-label="Cancel editing"
+            style={{ background: 'none', border: 'none', color: 'gray', cursor: 'pointer', display: 'flex' }}
           >
-            ✕
+            <CloseIcon size={14} />
           </button>
         </div>
       )}
 
-      {/* Message Composer */}
+      {/* Message Composer with Multi-line Auto-resizing Textarea */}
       <footer className="chat-composer">
         {isRecordingVoice ? (
           <div style={{ display: 'flex', alignItems: 'center', width: '100%', gap: '12px' }}>
@@ -1021,50 +1175,70 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               </span>
             </div>
             <button
+              type="button"
               className="action-btn"
               onClick={cancelVoiceRecord}
               title="Cancel Recording"
+              aria-label="Cancel Recording"
               style={{ color: 'var(--accent-danger)' }}
             >
-              🗑️
+              <TrashIcon size={18} />
             </button>
-            <button className="send-btn" onClick={stopAndSendVoice} title="Send Voice Note">
-              ➤
+            <button
+              type="button"
+              className="send-btn"
+              onClick={stopAndSendVoice}
+              title="Send Voice Note"
+              aria-label="Send Voice Note"
+            >
+              <SendIcon size={18} />
             </button>
           </div>
         ) : (
           <>
-            <button className="action-btn" title="Send File" onClick={handleTriggerFileInput}>
-              📎
+            <button
+              type="button"
+              className="action-btn"
+              title="Send File"
+              aria-label="Send File"
+              onClick={handleTriggerFileInput}
+            >
+              <PaperclipIcon size={20} />
             </button>
 
-            <input
-              type="text"
-              className="composer-input"
-              placeholder={editingMessageId ? 'Edit your message...' : 'Type a message...'}
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              className="composer-textarea"
+              placeholder={editingMessageId ? 'Edit your message (Enter to save, Shift+Enter for newline)...' : 'Type a message (Enter to send, Shift+Enter for newline)...'}
               value={editingMessageId ? editText : inputText}
               onChange={(e) => (editingMessageId ? setEditText(e.target.value) : setInputText(e.target.value))}
               onKeyDown={handleKeyDown}
+              aria-label="Type a message"
               autoFocus
             />
 
             {inputText.trim() || editingMessageId ? (
               <button
+                type="button"
                 className="send-btn"
-                title="Send"
+                title={editingMessageId ? 'Save edit' : 'Send'}
+                aria-label={editingMessageId ? 'Save edit' : 'Send message'}
                 onClick={handleSend}
                 disabled={editingMessageId ? !editText.trim() : !inputText.trim()}
               >
-                ➤
+                <SendIcon size={18} />
               </button>
             ) : (
               <button
+                type="button"
                 className="action-btn"
                 title="Record Voice Message"
+                aria-label="Record Voice Message"
                 onClick={startVoiceRecord}
                 style={{ fontSize: '20px' }}
               >
-                🎙️
+                <MicIcon size={20} />
               </button>
             )}
           </>

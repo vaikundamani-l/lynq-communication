@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Contact, Message, Group } from '@lynq/core';
+import { SearchIcon, CloseIcon, UsersIcon, PlusIcon, LinkIcon } from './Icons';
 
 interface ConversationListProps {
   activeTab?: 'chats' | 'contacts' | 'pairing' | 'diagnostics' | 'settings';
@@ -97,7 +98,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
   const onlineContacts = filteredContacts.filter((c) => c.status === 'online');
 
   return (
-    <section className="nav-panel">
+    <section className="nav-panel" aria-label={isContactsTab ? 'Discovered Peers' : 'Conversations'}>
       {/* Top Header */}
       <div className="nav-header">
         <div className="nav-header-left">
@@ -109,44 +110,41 @@ export const ConversationList: React.FC<ConversationListProps> = ({
         </div>
 
         <div className="nav-actions">
-          {!isContactsTab && (
+          {!isContactsTab && onOpenCreateGroup && (
             <button
               onClick={onOpenCreateGroup}
               className="action-pill-btn"
               title="Create Private Group"
+              aria-label="Create Private Group"
             >
-              <span>👥+</span>
+              <PlusIcon size={15} />
               <span className="pill-btn-label">Group</span>
             </button>
           )}
-          <button
-            onClick={onOpenPairing}
-            className="action-pill-btn accent"
-            title="Scan QR / Pair Device"
-          >
-            <span>🔗</span>
-            <span className="pill-btn-label">Pair</span>
-          </button>
         </div>
       </div>
 
       {/* Modern Frosted Search Bar */}
       <div className="search-container">
         <div className="search-input-wrapper">
-          <span className="search-icon">🔍</span>
+          <span className="search-icon">
+            <SearchIcon size={16} />
+          </span>
           <input
             type="text"
-            placeholder="Search chats, peers or IP..."
+            placeholder={isContactsTab ? 'Search peers by name or IP...' : 'Search chats, peers or IP...'}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search conversations and peers"
           />
           {search ? (
             <button
               onClick={() => setSearch('')}
               className="search-clear-btn"
               title="Clear search"
+              aria-label="Clear search input"
             >
-              ✕
+              <CloseIcon size={14} />
             </button>
           ) : (
             <span className="search-kbd-chip">/</span>
@@ -154,7 +152,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
         </div>
       </div>
 
-      <div className="items-list">
+      <div className="items-list" role="list">
         {/* Groups Section (shown only in Chats tab) */}
         {!isContactsTab && filteredGroups.length > 0 && (
           <div className="section-group">
@@ -167,17 +165,20 @@ export const ConversationList: React.FC<ConversationListProps> = ({
               const isSelected = selectedGroupId === group.id;
 
               return (
-                <div
+                <button
+                  type="button"
                   key={group.id}
                   className={`contact-card ${isSelected ? 'selected' : ''}`}
                   onClick={() => onSelectGroup?.(group)}
+                  aria-selected={isSelected}
+                  role="listitem"
                 >
                   <div className="avatar-wrapper">
                     <div
                       className="avatar group-avatar"
                       style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' }}
                     >
-                      👥
+                      <UsersIcon size={18} />
                     </div>
                   </div>
 
@@ -196,7 +197,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
                       <span className="chip-tag group-tag">Group</span>
                     </div>
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -221,8 +222,8 @@ export const ConversationList: React.FC<ConversationListProps> = ({
             <p className="radar-subtitle">
               Open <strong>LYNQ</strong> on your phone or laptop on the same Wi-Fi network to connect and chat automatically.
             </p>
-            <button onClick={onOpenPairing} className="radar-cta-btn">
-              🔗 Show QR Pairing Code
+            <button onClick={onOpenPairing} className="radar-cta-btn" aria-label="Show QR Pairing Code">
+              <LinkIcon size={16} /> Show QR Pairing Code
             </button>
           </div>
         ) : (
@@ -236,10 +237,13 @@ export const ConversationList: React.FC<ConversationListProps> = ({
             const isOnline = contact.status === 'online';
 
             return (
-              <div
+              <button
+                type="button"
                 key={contact.uid}
                 className={`contact-card ${isSelected ? 'selected' : ''}`}
                 onClick={() => onSelectContact(contact)}
+                aria-selected={isSelected}
+                role="listitem"
               >
                 <div className="avatar-wrapper">
                   <div className="avatar" style={{ background: avatarBg }}>
@@ -288,7 +292,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
                     </div>
                   </div>
                 </div>
-              </div>
+              </button>
             );
           })
         )}

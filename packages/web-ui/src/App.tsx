@@ -63,6 +63,18 @@ export const App: React.FC = () => {
     setDownloadPathState(newPath);
     safeStorage.setItem('lynq_download_path', newPath);
   };
+
+  const [preferences, setPreferences] = useState(() => {
+    return safeStorage.getJSON<{ requireApproval: boolean; soundChimes: boolean }>(
+      'lynq_settings',
+      { requireApproval: true, soundChimes: true }
+    );
+  });
+
+  const handleUpdatePreferences = (newPrefs: { requireApproval: boolean; soundChimes: boolean }) => {
+    setPreferences(newPrefs);
+    safeStorage.setJSON('lynq_settings', newPrefs);
+  };
   const [myToken] = useState(() => generatePairingToken());
   const [isPairingOpen, setIsPairingOpen] = useState(false);
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
@@ -391,7 +403,17 @@ export const App: React.FC = () => {
 
   const handleTabChange = (tab: NavTab) => {
     setActiveTab(tab);
-    if (tab === 'pairing') {
+    if (tab === 'contacts') {
+      setSelectedContactId(null);
+      setSelectedGroupId(null);
+      if (typeof window !== 'undefined') {
+        window.history.pushState({ type: 'peers' }, '', '#/peers');
+      }
+    } else if (tab === 'chats') {
+      if (typeof window !== 'undefined' && !selectedContactId && !selectedGroupId) {
+        window.history.pushState({ type: 'home' }, '', '#/');
+      }
+    } else if (tab === 'pairing') {
       setIsPairingOpen(true);
     } else if (tab === 'settings') {
       setIsSettingsOpen(true);
@@ -979,6 +1001,9 @@ export const App: React.FC = () => {
             }
           }
         }}
+        onOpenPairing={() => setIsPairingOpen(true)}
+        onOpenCreateGroup={() => setIsCreateGroupOpen(true)}
+        onOpenDiagnostics={() => setIsDiagnosticsOpen(true)}
         networkStatus={networkStatus}
       />
 
@@ -1002,6 +1027,9 @@ export const App: React.FC = () => {
         onToggleTheme={toggleTheme}
         downloadPath={downloadPath}
         onUpdateDownloadPath={setDownloadPath}
+        requireApproval={preferences.requireApproval}
+        soundChimes={preferences.soundChimes}
+        onUpdatePreferences={handleUpdatePreferences}
         onOpenDiagnostics={() => {
           setIsSettingsOpen(false);
           setIsDiagnosticsOpen(true);
