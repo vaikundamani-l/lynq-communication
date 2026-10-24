@@ -583,6 +583,85 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 {/* Message Content */}
                 {msg.type === 'voice' ? (
                   <VoiceMessageBubble message={msg} />
+                ) : msg.type === 'file' ? (
+                  <div className="file-message-card" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {msg.fileMetadata?.localPath && msg.fileMetadata.mimeType?.startsWith('image/') && (
+                      <img
+                        src={msg.fileMetadata.localPath}
+                        alt={msg.fileMetadata.fileName || 'Shared image'}
+                        style={{
+                          maxWidth: '100%',
+                          maxHeight: '260px',
+                          borderRadius: '8px',
+                          objectFit: 'contain',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => {
+                          if (msg.fileMetadata?.localPath) {
+                            const win = window.open();
+                            win?.document.write(`<img src="${msg.fileMetadata.localPath}" style="max-width:100%" />`);
+                          }
+                        }}
+                      />
+                    )}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        background: 'rgba(0, 0, 0, 0.15)',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                      }}
+                    >
+                      <span style={{ fontSize: '24px' }}>📄</span>
+                      <div style={{ flex: 1, overflow: 'hidden' }}>
+                        <div
+                          style={{
+                            fontWeight: 600,
+                            fontSize: '13px',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {msg.fileMetadata?.fileName || msg.content}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          {msg.fileMetadata?.fileSize
+                            ? `${(msg.fileMetadata.fileSize / 1024).toFixed(1)} KB`
+                            : 'File'}
+                        </div>
+                      </div>
+                      {msg.fileMetadata?.localPath && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const a = document.createElement('a');
+                            a.href = msg.fileMetadata!.localPath!;
+                            a.download = msg.fileMetadata!.fileName || 'file';
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                          }}
+                          className="action-btn"
+                          title="Download File"
+                          style={{
+                            fontSize: '13px',
+                            padding: '4px 10px',
+                            height: 'auto',
+                            width: 'auto',
+                            borderRadius: '6px',
+                            background: 'var(--accent)',
+                            color: '#ffffff',
+                            fontWeight: 600,
+                          }}
+                        >
+                          ⬇️ Save
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 ) : (
                   <div
                     className="message-content"

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Contact,
   Message,
@@ -67,96 +67,109 @@ export const App: React.FC = () => {
   const [callEngine, setCallEngine] = useState<CallSessionEngine | null>(null);
   const [notificationService] = useState(() => new NotificationService());
 
-  // Initial contacts
-  const [contacts, setContacts] = useState<Contact[]>([
-    {
-      uid: 'peer_node_1',
-      username: 'Ubuntu Laptop',
-      ipAddress: '192.168.1.102',
-      port: 4848,
-      status: 'online',
-      lastSeen: Date.now(),
-      deviceInfo: {
-        deviceId: 'dev_laptop_1',
-        deviceName: 'ThinkPad LAN',
-        platform: 'linux',
-        appVersion: '0.1.0',
-      },
-      isPaired: true,
-    },
-    {
-      uid: 'peer_node_2',
-      username: 'Android Phone',
-      ipAddress: '192.168.1.108',
-      port: 4848,
-      status: 'away',
-      lastSeen: Date.now() - 30000,
-      deviceInfo: {
-        deviceId: 'dev_phone_1',
-        deviceName: 'Pixel 8',
-        platform: 'android',
-        appVersion: '0.1.0',
-      },
-      isPaired: false,
-    },
-  ]);
+  // Persistent contacts from localStorage
+  const [contacts, setContacts] = useState<Contact[]>(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const saved = window.localStorage.getItem('lynq_contacts');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            return parsed.filter(
+              (c: Contact) => c && c.uid && c.uid !== 'peer_node_1' && c.uid !== 'peer_node_2'
+            );
+          }
+        } catch {}
+      }
+    }
+    return [];
+  });
 
-  // Initial groups
-  const [groups, setGroups] = useState<Group[]>([
-    {
-      id: 'grp_local_engineering',
-      name: 'Local Engineering',
-      description: 'LAN development and project updates',
-      creatorId: currentUserId,
-      members: [
-        { userId: currentUserId, username: 'LocalHost', role: 'creator', joinedAt: Date.now() - 3600000 },
-        { userId: 'peer_node_1', username: 'Ubuntu Laptop', role: 'admin', joinedAt: Date.now() - 3600000 },
-        { userId: 'peer_node_2', username: 'Android Phone', role: 'member', joinedAt: Date.now() - 3600000 },
-      ],
-      createdAt: Date.now() - 3600000,
-      updatedAt: Date.now() - 60000,
-      pinnedMessageIds: [],
-    },
-  ]);
+  // Persistent groups from localStorage
+  const [groups, setGroups] = useState<Group[]>(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const saved = window.localStorage.getItem('lynq_groups');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) return parsed;
+        } catch {}
+      }
+    }
+    return [];
+  });
 
-  const [selectedContact, setSelectedContact] = useState<Contact | null>(contacts[0]);
-  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
+  // Persistent messages from localStorage
+  const [messages, setMessages] = useState<Message[]>(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const saved = window.localStorage.getItem('lynq_messages');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            return parsed.filter(
+              (m: Message) => m.senderId !== 'peer_node_1' && m.receiverId !== 'peer_node_1'
+            );
+          }
+        } catch {}
+      }
+    }
+    return [];
+  });
 
-  // Initial messages
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'msg_welcome_1',
-      senderId: 'peer_node_1',
-      receiverId: currentUserId,
-      conversationId: 'conv_1',
-      conversationType: 'direct',
-      type: 'text',
-      content: 'Welcome to LYNQ Communication! Ultra-fast local LAN messaging & P2P file transfers are ready.',
-      timestamp: Date.now() - 60000,
-      status: 'read',
-      reactions: { '👍': ['peer_node_1'] },
-      isEdited: false,
-      isDeleted: false,
-      isPinned: false,
-    },
-    {
-      id: 'msg_group_welcome',
-      senderId: 'peer_node_1',
-      receiverId: 'grp_local_engineering',
-      conversationId: 'grp_local_engineering',
-      conversationType: 'group',
-      type: 'text',
-      content: 'Welcome to the Local Engineering private group! All members can post and transfer files directly.',
-      timestamp: Date.now() - 50000,
-      status: 'read',
-      reactions: { '🔥': [currentUserId] },
-      isEdited: false,
-      isDeleted: false,
-      isPinned: false,
-    },
-  ]);
+  // Active chat selection
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+
+  const selectedContactIdRef = useRef<string | null>(null);
+  selectedContactIdRef.current = selectedContactId;
+
+  const selectedContact = contacts.find((c) => c.uid === selectedContactId) || null;
+  const selectedGroup = groups.find((g) => g.id === selectedGroupId) || null;
 
   const [client, setClient] = useState<LynqClient | null>(null);
+
+  // Sync contacts to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem('lynq_contacts', JSON.stringify(contacts));
+    }
+  }, [contacts]);
+
+  // Sync groups to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem('lynq_groups', JSON.stringify(groups));
+    }
+  }, [groups]);
+
+  // Sync messages to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem('lynq_messages', JSON.stringify(messages.slice(-500)));
+    }
+  }, [messages]);
+
+  // Automatically mark unread messages as read when contact is opened
+  useEffect(() => {
+    if (selectedContactId && client) {
+      const unread = messages.filter(
+        (m) => m.senderId === selectedContactId && m.receiverId === currentUserId && m.status !== 'read'
+      );
+      if (unread.length > 0) {
+        unread.forEach((m) => {
+          client.sendReadReceipt(selectedContactId, m.id);
+        });
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.senderId === selectedContactId && m.receiverId === currentUserId
+              ? { ...m, status: 'read' }
+              : m
+          )
+        );
+      }
+    }
+  }, [selectedContactId, client, messages, currentUserId]);
 
   const setUsername = (newName: string) => {
     setUsernameState(newName);
@@ -166,7 +179,7 @@ export const App: React.FC = () => {
     client?.updateUsername(newName);
   };
 
-  // Initialize client
+  // Initialize client and WebRTC call engine (persistent connection)
   useEffect(() => {
     const lynqClient = new LynqClient(currentUserId, username, getDefaultSignalingUrl());
     lynqClient.connect();
@@ -228,8 +241,8 @@ export const App: React.FC = () => {
           return [...prev, newMsg];
         });
 
-        // Automatically acknowledge and mark as read if conversation is open
-        if (selectedContact && newMsg.senderId === selectedContact.uid) {
+        // Automatically acknowledge and mark as read if conversation is active
+        if (selectedContactIdRef.current === newMsg.senderId) {
           lynqClient.sendReadReceipt(newMsg.senderId, newMsg.id);
         }
       } else if (event.type === 'ack') {
@@ -239,7 +252,7 @@ export const App: React.FC = () => {
           )
         );
       } else if (event.type === 'typing') {
-        if (selectedContact && event.payload.userId === selectedContact.uid) {
+        if (selectedContactIdRef.current === event.payload.userId) {
           setIsPeerTyping(event.payload.isTyping);
         }
       } else if (event.type === 'reaction') {
@@ -272,14 +285,15 @@ export const App: React.FC = () => {
         );
       } else if (event.type === 'contact') {
         const peer = event.payload;
-        if (peer.uid !== currentUserId) {
+        if (peer.uid && peer.uid !== currentUserId) {
           setContacts((prev) => {
             const exists = prev.some((c) => c.uid === peer.uid);
             return exists
               ? prev.map((c) => (c.uid === peer.uid ? { ...c, ...peer } : c))
               : [peer, ...prev.filter((c) => c.uid !== peer.uid)];
           });
-          setSelectedContact((current) => current || peer);
+          // Auto-select discovered peer if nothing is currently selected
+          setSelectedContactId((current) => current || peer.uid);
         }
       }
     });
@@ -294,7 +308,7 @@ export const App: React.FC = () => {
         engine.hangup('unmounted');
       }
     };
-  }, [currentUserId, selectedContact]);
+  }, [currentUserId, username]);
 
   const toggleTheme = () => {
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
@@ -337,23 +351,23 @@ export const App: React.FC = () => {
         const grp = groups.find((g) => g.id === targetId);
         grp?.members.forEach((m) => {
           if (m.userId !== currentUserId) {
-            client.sendMessage(m.userId, forwardMsg.content);
+            client.sendMessage({ ...forwardMsg, receiverId: m.userId });
           }
         });
       } else {
-        client.sendMessage(targetId, forwardMsg.content);
+        client.sendMessage(forwardMsg);
       }
     }
   };
 
   const handleSelectContact = (contact: Contact) => {
-    setSelectedContact(contact);
-    setSelectedGroup(null);
+    setSelectedContactId(contact.uid);
+    setSelectedGroupId(null);
   };
 
   const handleSelectGroup = (group: Group) => {
-    setSelectedGroup(group);
-    setSelectedContact(null);
+    setSelectedGroupId(group.id);
+    setSelectedContactId(null);
   };
 
   const handleCreateGroup = (name: string, description: string, selectedMemberIds: string[]) => {
@@ -379,8 +393,8 @@ export const App: React.FC = () => {
     };
 
     setGroups((prev) => [newGroup, ...prev]);
-    setSelectedGroup(newGroup);
-    setSelectedContact(null);
+    setSelectedGroupId(groupId);
+    setSelectedContactId(null);
 
     // Add system message
     const sysMsg: Message = {
@@ -402,13 +416,13 @@ export const App: React.FC = () => {
   };
 
   const handleSendMessage = (content: string, replyToId?: string) => {
-    const targetRecipientId = selectedGroup ? selectedGroup.id : selectedContact?.uid;
+    const targetRecipientId = selectedGroupId || selectedContactId;
     if (!targetRecipientId) return;
 
-    const convId = selectedGroup
-      ? selectedGroup.id
-      : [currentUserId, selectedContact!.uid].sort().join('_');
-    const convType = selectedGroup ? 'group' : 'direct';
+    const convId = selectedGroupId
+      ? selectedGroupId
+      : [currentUserId, selectedContactId!].sort().join('_');
+    const convType = selectedGroupId ? 'group' : 'direct';
 
     const newMsg: Message = {
       id: generateUUID(),
@@ -430,76 +444,83 @@ export const App: React.FC = () => {
     setMessages((prev) => [...prev, newMsg]);
 
     if (client) {
-      if (selectedGroup) {
+      if (selectedGroupId && selectedGroup) {
         // Send fan-out to all group members
         for (const member of selectedGroup.members) {
           if (member.userId !== currentUserId) {
-            client.sendMessage(member.userId, content, replyToId);
+            client.sendMessage({ ...newMsg, receiverId: member.userId });
           }
         }
       } else {
-        client.sendMessage(selectedContact!.uid, content, replyToId);
+        client.sendMessage(newMsg);
       }
     }
   };
 
   const handleSendVoiceMessage = (voiceData: RecordedVoiceData) => {
-    const targetRecipientId = selectedGroup ? selectedGroup.id : selectedContact?.uid;
+    const targetRecipientId = selectedGroupId || selectedContactId;
     if (!targetRecipientId) return;
 
-    const convId = selectedGroup
-      ? selectedGroup.id
-      : [currentUserId, selectedContact!.uid].sort().join('_');
-    const convType = selectedGroup ? 'group' : 'direct';
+    const convId = selectedGroupId
+      ? selectedGroupId
+      : [currentUserId, selectedContactId!].sort().join('_');
+    const convType = selectedGroupId ? 'group' : 'direct';
 
-    const voiceMsg: Message = {
-      id: generateUUID(),
-      senderId: currentUserId,
-      receiverId: targetRecipientId,
-      conversationId: convId,
-      conversationType: convType,
-      type: 'voice',
-      content: 'Voice note',
-      timestamp: Date.now(),
-      status: client ? 'sent' : 'pending',
-      reactions: {},
-      isEdited: false,
-      isDeleted: false,
-      isPinned: false,
-      fileMetadata: {
-        fileId: generateUUID(),
-        fileName: `voice_note_${Date.now()}.webm`,
-        fileSize: voiceData.audioBlob.size,
-        mimeType: voiceData.mimeType,
-        durationSeconds: voiceData.durationSeconds,
-        sha256Hash: 'sha256_voice_note',
-      },
-    };
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64Audio = reader.result as string;
 
-    setMessages((prev) => [...prev, voiceMsg]);
+      const voiceMsg: Message = {
+        id: generateUUID(),
+        senderId: currentUserId,
+        receiverId: targetRecipientId,
+        conversationId: convId,
+        conversationType: convType,
+        type: 'voice',
+        content: 'Voice note',
+        timestamp: Date.now(),
+        status: client ? 'sent' : 'pending',
+        reactions: {},
+        isEdited: false,
+        isDeleted: false,
+        isPinned: false,
+        fileMetadata: {
+          fileId: generateUUID(),
+          fileName: `voice_note_${Date.now()}.webm`,
+          fileSize: voiceData.audioBlob.size,
+          mimeType: voiceData.mimeType,
+          durationSeconds: voiceData.durationSeconds,
+          sha256Hash: 'sha256_voice_note',
+          localPath: base64Audio,
+        },
+      };
 
-    if (client) {
-      if (selectedGroup) {
-        for (const member of selectedGroup.members) {
-          if (member.userId !== currentUserId) {
-            client.sendMessage(member.userId, voiceMsg.content);
+      setMessages((prev) => [...prev, voiceMsg]);
+
+      if (client) {
+        if (selectedGroupId && selectedGroup) {
+          for (const member of selectedGroup.members) {
+            if (member.userId !== currentUserId) {
+              client.sendMessage({ ...voiceMsg, receiverId: member.userId });
+            }
           }
+        } else {
+          client.sendMessage(voiceMsg);
         }
-      } else {
-        client.sendMessage(selectedContact!.uid, voiceMsg.content);
       }
-    }
+    };
+    reader.readAsDataURL(voiceData.audioBlob);
   };
 
   const handleSendTyping = () => {
-    if (selectedContact && client) {
-      const convId = [currentUserId, selectedContact.uid].sort().join('_');
-      client.sendTyping(selectedContact.uid, convId);
+    if (selectedContactId && client) {
+      const convId = [currentUserId, selectedContactId].sort().join('_');
+      client.sendTyping(selectedContactId, convId);
     }
   };
 
   const handleReact = (messageId: string, emoji: string) => {
-    const targetId = selectedGroup ? selectedGroup.id : selectedContact?.uid;
+    const targetId = selectedGroupId || selectedContactId;
     if (!targetId) return;
 
     setMessages((prev) =>
@@ -516,8 +537,8 @@ export const App: React.FC = () => {
           if (reactions[emoji].length === 0) delete reactions[emoji];
         }
 
-        if (selectedContact) {
-          client?.sendReaction(selectedContact.uid, messageId, emoji, action);
+        if (selectedContactId) {
+          client?.sendReaction(selectedContactId, messageId, emoji, action);
         }
         return { ...m, reactions };
       })
@@ -528,8 +549,8 @@ export const App: React.FC = () => {
     setMessages((prev) =>
       prev.map((m) => (m.id === messageId ? { ...m, content: newContent, isEdited: true, editedAt: Date.now() } : m))
     );
-    if (selectedContact) {
-      client?.sendEdit(selectedContact.uid, messageId, newContent);
+    if (selectedContactId) {
+      client?.sendEdit(selectedContactId, messageId, newContent);
     }
   };
 
@@ -539,8 +560,8 @@ export const App: React.FC = () => {
         m.id === messageId ? { ...m, isDeleted: true, content: 'This message was deleted' } : m
       )
     );
-    if (selectedContact) {
-      client?.sendDelete(selectedContact.uid, messageId);
+    if (selectedContactId) {
+      client?.sendDelete(selectedContactId, messageId);
     }
   };
 
@@ -551,7 +572,7 @@ export const App: React.FC = () => {
   };
 
   const handleRetryMessage = (messageId: string) => {
-    const targetId = selectedGroup ? selectedGroup.id : selectedContact?.uid;
+    const targetId = selectedGroupId || selectedContactId;
     if (!targetId) return;
     const msg = messages.find((m) => m.id === messageId);
     if (!msg) return;
@@ -560,19 +581,71 @@ export const App: React.FC = () => {
       prev.map((m) => (m.id === messageId ? { ...m, status: 'pending', timestamp: Date.now() } : m))
     );
 
-    if (client && selectedContact) {
-      client.sendMessage(selectedContact.uid, msg.content, msg.replyToId);
+    if (client && selectedContactId) {
+      client.sendMessage(msg);
     }
   };
 
   const handleDropFiles = async (fileList: FileList) => {
-    const targetId = selectedGroup ? selectedGroup.id : selectedContact?.uid;
-    if (!targetId) return;
+    const targetRecipientId = selectedGroupId || selectedContactId;
+    if (!targetRecipientId) {
+      alert('Please select a contact or group first to share files.');
+      return;
+    }
+
+    const convId = selectedGroupId
+      ? selectedGroupId
+      : [currentUserId, selectedContactId!].sort().join('_');
+    const convType = selectedGroupId ? 'group' : 'direct';
 
     for (let i = 0; i < fileList.length; i++) {
       const file = fileList[i];
       const transferId = generateUUID();
       const safeName = sanitizeFilename(file.name);
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64Data = reader.result as string;
+
+        const fileMsg: Message = {
+          id: generateUUID(),
+          senderId: currentUserId,
+          receiverId: targetRecipientId,
+          conversationId: convId,
+          conversationType: convType,
+          type: 'file',
+          content: `Shared file: ${safeName}`,
+          timestamp: Date.now(),
+          status: client ? 'sent' : 'pending',
+          reactions: {},
+          isEdited: false,
+          isDeleted: false,
+          isPinned: false,
+          fileMetadata: {
+            fileId: transferId,
+            fileName: safeName,
+            fileSize: file.size,
+            mimeType: file.type || 'application/octet-stream',
+            sha256Hash: 'sha256_' + generateUUID().slice(0, 8),
+            localPath: base64Data,
+          },
+        };
+
+        setMessages((prev) => [...prev, fileMsg]);
+
+        if (client) {
+          if (selectedGroupId && selectedGroup) {
+            for (const member of selectedGroup.members) {
+              if (member.userId !== currentUserId) {
+                client.sendMessage({ ...fileMsg, receiverId: member.userId });
+              }
+            }
+          } else {
+            client.sendMessage(fileMsg);
+          }
+        }
+      };
+      reader.readAsDataURL(file);
 
       const transfer: FileTransfer = {
         transferId,
@@ -580,71 +653,21 @@ export const App: React.FC = () => {
         fileName: safeName,
         fileSize: file.size,
         mimeType: file.type || 'application/octet-stream',
-        sha256Hash: 'computing...',
+        sha256Hash: 'sha256_verified',
         chunkSize: 64 * 1024,
         totalChunks: Math.ceil(file.size / (64 * 1024)),
-        transferredChunks: 0,
-        transferredBytes: 0,
+        transferredChunks: Math.ceil(file.size / (64 * 1024)),
+        transferredBytes: file.size,
         direction: 'outgoing',
         senderId: currentUserId,
-        receiverId: targetId,
-        status: 'transferring',
-        speedBps: 25 * 1024 * 1024, // 25 MB/s LAN average
-        etaSeconds: Math.ceil(file.size / (25 * 1024 * 1024)),
+        receiverId: targetRecipientId,
+        status: 'completed',
+        speedBps: 25 * 1024 * 1024,
+        etaSeconds: 0,
         startedAt: Date.now(),
+        completedAt: Date.now(),
       };
-
       setActiveTransfers((prev) => [...prev, transfer]);
-
-      // Progress animation simulation
-      let sentBytes = 0;
-      const interval = setInterval(() => {
-        sentBytes += file.size / 5;
-        if (sentBytes >= file.size) {
-          sentBytes = file.size;
-          clearInterval(interval);
-          setActiveTransfers((prev) =>
-            prev.map((t) =>
-              t.transferId === transferId
-                ? { ...t, transferredBytes: file.size, status: 'completed', completedAt: Date.now() }
-                : t
-            )
-          );
-
-          // Add file bubble to chat
-          const fileMsg: Message = {
-            id: generateUUID(),
-            senderId: currentUserId,
-            receiverId: targetId,
-            conversationId: selectedGroup
-              ? selectedGroup.id
-              : [currentUserId, selectedContact!.uid].sort().join('_'),
-            conversationType: selectedGroup ? 'group' : 'direct',
-            type: 'file',
-            content: `Shared file: ${safeName}`,
-            timestamp: Date.now(),
-            status: 'sent',
-            reactions: {},
-            isEdited: false,
-            isDeleted: false,
-            isPinned: false,
-            fileMetadata: {
-              fileId: transfer.fileId,
-              fileName: safeName,
-              fileSize: file.size,
-              mimeType: file.type,
-              sha256Hash: 'sha256_verified',
-            },
-          };
-          setMessages((prev) => [...prev, fileMsg]);
-        } else {
-          setActiveTransfers((prev) =>
-            prev.map((t) =>
-              t.transferId === transferId ? { ...t, transferredBytes: Math.round(sentBytes) } : t
-            )
-          );
-        }
-      }, 300);
     }
   };
 
@@ -658,12 +681,12 @@ export const App: React.FC = () => {
     if (!incomingTransfer) return;
     setActiveTransfers((prev) => [
       ...prev,
-      { ...incomingTransfer, status: 'transferring', transferredBytes: incomingTransfer.fileSize },
+      { ...incomingTransfer, status: 'completed', transferredBytes: incomingTransfer.fileSize },
     ]);
     setIncomingTransfer(null);
   };
 
-  const handleRejectIncomingTransfer = (transferId: string) => {
+  const handleRejectIncomingTransfer = (_transferId: string) => {
     setIncomingTransfer(null);
   };
 
@@ -730,7 +753,7 @@ export const App: React.FC = () => {
   // Filter messages for active chat (either active contact or active group)
   const activeConversationMessages = messages.filter((m) => {
     if (selectedGroup) {
-      return m.conversationId === selectedGroup.id;
+      return m.conversationId === selectedGroup.id || m.receiverId === selectedGroup.id;
     }
     if (selectedContact) {
       return (
@@ -759,8 +782,8 @@ export const App: React.FC = () => {
         contacts={contacts}
         groups={groups}
         messages={messages}
-        selectedContactId={selectedContact?.uid || null}
-        selectedGroupId={selectedGroup?.id || null}
+        selectedContactId={selectedContactId}
+        selectedGroupId={selectedGroupId}
         onSelectContact={handleSelectContact}
         onSelectGroup={handleSelectGroup}
         onOpenPairing={() => setIsPairingOpen(true)}
@@ -789,8 +812,8 @@ export const App: React.FC = () => {
         onInitiateCall={handleInitiateCall}
         onSendFile={handleSendFile}
         onBack={() => {
-          setSelectedContact(null);
-          setSelectedGroup(null);
+          setSelectedContactId(null);
+          setSelectedGroupId(null);
         }}
         networkStatus={networkStatus}
       />

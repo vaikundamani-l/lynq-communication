@@ -16,6 +16,9 @@ export const VoiceMessageBubble: React.FC<VoiceMessageBubbleProps> = ({ message 
   useEffect(() => {
     // Construct audio source from metadata localPath or synthesized tone
     const audio = new Audio();
+    if (message.fileMetadata?.localPath) {
+      audio.src = message.fileMetadata.localPath;
+    }
     audioRef.current = audio;
 
     audio.ontimeupdate = () => {

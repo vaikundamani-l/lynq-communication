@@ -159,27 +159,36 @@ export class LynqClient {
     return false;
   }
 
-  public sendMessage(recipientId: string, content: string, replyToId?: string): Message {
-    const convId = [this.myUid, recipientId].sort().join('_');
-    const msg: Message = {
-      id: generateUUID(),
-      senderId: this.myUid,
-      receiverId: recipientId,
-      conversationId: convId,
-      conversationType: 'direct',
-      type: 'text',
-      content,
-      timestamp: Date.now(),
-      status: this.ws && this.ws.readyState === WebSocket.OPEN ? 'sent' : 'pending',
-      replyToId,
-      reactions: {},
-      isEdited: false,
-      isDeleted: false,
-      isPinned: false,
-    };
+  public sendMessage(recipientIdOrMsg: string | Message, content?: string, replyToId?: string): Message {
+    let msg: Message;
+    let recipientId: string;
+
+    if (typeof recipientIdOrMsg === 'object') {
+      msg = recipientIdOrMsg;
+      recipientId = msg.receiverId;
+    } else {
+      recipientId = recipientIdOrMsg;
+      const convId = [this.myUid, recipientId].sort().join('_');
+      msg = {
+        id: generateUUID(),
+        senderId: this.myUid,
+        receiverId: recipientId,
+        conversationId: convId,
+        conversationType: 'direct',
+        type: 'text',
+        content: content || '',
+        timestamp: Date.now(),
+        status: this.ws && this.ws.readyState === WebSocket.OPEN ? 'sent' : 'pending',
+        replyToId,
+        reactions: {},
+        isEdited: false,
+        isDeleted: false,
+        isPinned: false,
+      };
+    }
 
     this.sendEnvelope({
-      id: generateUUID(),
+      id: msg.id || generateUUID(),
       type: 'msg:send',
       senderId: this.myUid,
       recipientId,

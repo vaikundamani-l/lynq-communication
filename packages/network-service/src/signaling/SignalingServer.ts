@@ -20,8 +20,8 @@ export class SignalingServer extends EventEmitter {
 
   constructor(private options: SignalingServerOptions) {
     super();
-    this.maxPayloadBytes = options.maxPayloadBytes || 512 * 1024; // 512 KB
-    this.rateLimitPerSec = options.rateLimitPerSec || 100;
+    this.maxPayloadBytes = options.maxPayloadBytes || 25 * 1024 * 1024; // 25 MB LAN bound
+    this.rateLimitPerSec = options.rateLimitPerSec || 200;
   }
 
   public async start(): Promise<void> {
@@ -91,11 +91,15 @@ export class SignalingServer extends EventEmitter {
 
         const envelope: SignalingEnvelope = JSON.parse(rawStr);
 
-        // Register client on first message
-        if (envelope.senderId && !clientUid) {
-          clientUid = envelope.senderId;
-          this.clients.set(clientUid, ws);
-          this.emit('clientConnected', clientUid);
+        // Register or refresh client WebSocket reference
+        if (envelope.senderId) {
+          if (!clientUid) {
+            clientUid = envelope.senderId;
+            this.clients.set(clientUid, ws);
+            this.emit('clientConnected', clientUid);
+          } else {
+            this.clients.set(envelope.senderId, ws);
+          }
         }
 
         // Enforce rate limit per sender
@@ -115,8 +119,10 @@ export class SignalingServer extends EventEmitter {
 
     ws.on('close', () => {
       if (clientUid) {
-        this.clients.delete(clientUid);
-        this.clientMetadata.delete(clientUid);
+        if (this.clients.get(clientUid) === ws) {
+          this.clients.delete(clientUid);
+          this.clientMetadata.delete(clientUid);
+        }
         this.emit('clientDisconnected', clientUid);
 
         // Announce peer departure to all other connected clients
