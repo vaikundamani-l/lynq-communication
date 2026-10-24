@@ -7,6 +7,7 @@ export interface SignalingServerOptions {
   host?: string;
   maxPayloadBytes?: number;
   rateLimitPerSec?: number;
+  authorizer?: (senderId: string, recipientId: string, envelopeType: string) => boolean;
 }
 
 export class SignalingServer extends EventEmitter {
@@ -91,10 +92,49 @@ export class SignalingServer extends EventEmitter {
 
         const envelope: SignalingEnvelope = JSON.parse(rawStr);
 
-        // Security check: validate envelope structure
-        if (!envelope || typeof envelope !== 'object' || !envelope.senderId || typeof envelope.senderId !== 'string') {
-          this.emit('securityViolation', { type: 'invalid_envelope', reason: 'Missing or invalid senderId' });
+        // Security check: validate complete envelope schema
+        if (
+          !envelope ||
+          typeof envelope !== 'object' ||
+          !envelope.senderId ||
+          typeof envelope.senderId !== 'string' ||
+          !envelope.id ||
+          typeof envelope.id !== 'string' ||
+          !envelope.type ||
+          typeof envelope.type !== 'string' ||
+          !envelope.recipientId ||
+          typeof envelope.recipientId !== 'string'
+        ) {
+          this.emit('securityViolation', {
+            type: 'invalid_envelope',
+            reason: 'Missing or invalid id, type, senderId, or recipientId',
+          });
           return;
+        }
+
+        // Validate timestamp sanity (reject envelopes claiming timestamps > 24 hours in the future)
+        if (typeof envelope.timestamp === 'number') {
+          const now = Date.now();
+          if (envelope.timestamp > now + 86400000 || envelope.timestamp < now - 30 * 86400000) {
+            this.emit('securityViolation', {
+              type: 'invalid_timestamp',
+              timestamp: envelope.timestamp,
+              now,
+            });
+            return;
+          }
+        }
+
+        // Validate text content payload boundary
+        if (envelope.type === 'msg:send' && envelope.payload) {
+          const content = (envelope.payload as any).content;
+          if (typeof content === 'string' && content.length > 1024 * 1024) {
+            this.emit('securityViolation', {
+              type: 'message_too_large',
+              contentLength: content.length,
+            });
+            return;
+          }
         }
 
         // Connection-level Identity Binding and Anti-Spoofing Enforcement
@@ -260,6 +300,41 @@ export class SignalingServer extends EventEmitter {
         }
       }
       return;
+    }
+
+    // Enforce recipient authorization if authorizer callback configured
+    if (
+      this.options.authorizer &&
+      recipientId !== 'server' &&
+      recipientId !== '*'
+    ) {
+      const allowed = this.options.authorizer(envelope.senderId, recipientId, type);
+      if (!allowed) {
+        this.emit('securityViolation', {
+          type: 'unauthorized_recipient',
+          senderId: envelope.senderId,
+          recipientId,
+          messageType: type,
+        });
+        try {
+          senderWs.send(
+            JSON.stringify({
+              id: generateUUID(),
+              type: 'error',
+              senderId: 'server',
+              recipientId: envelope.senderId,
+              timestamp: Date.now(),
+              payload: {
+                code: 'UNAUTHORIZED_RECIPIENT',
+                message: `Sender '${envelope.senderId}' is not authorized to communicate with recipient '${recipientId}'`,
+              },
+            })
+          );
+        } catch {
+          // ignore
+        }
+        return;
+      }
     }
 
     // Forward to destination recipient if connected

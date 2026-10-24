@@ -73,6 +73,11 @@ export class MessageRepository {
     return this.mapRowToMessage(row);
   }
 
+  public getRecentMessages(limit: number = 200): Message[] {
+    const rows = this.db.prepare('SELECT * FROM messages ORDER BY timestamp DESC LIMIT ?').all(limit) as MessageRow[];
+    return rows.reverse().map((r) => this.mapRowToMessage(r));
+  }
+
   public getConversationMessages(
     conversationId: string,
     limit: number = 50,

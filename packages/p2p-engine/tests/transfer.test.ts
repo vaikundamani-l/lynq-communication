@@ -241,4 +241,181 @@ describe('FileTransferEngine (P2P Streaming, Chunking & Verification)', () => {
       )
     ).rejects.toThrow('exceeds the maximum supported ceiling of 20 GB');
   });
+
+  it('handles transport send failures by aborting transfer and emitting failure', async () => {
+    const senderEngine = new FileTransferEngine('alice');
+    const { transfer } = await senderEngine.createTransferOffer(
+      {
+        name: 'test.dat',
+        size: 1000,
+        type: 'application/octet-stream',
+        data: new Uint8Array(1000),
+      },
+      'bob'
+    );
+
+    let failedEvent = false;
+    senderEngine.on('transferFailed', () => {
+      failedEvent = true;
+    });
+
+    const failingTransport: TransferTransport = {
+      sendData: () => false, // simulates transport failure (e.g. disconnected socket)
+    };
+
+    await senderEngine.startStreamingOutgoing(transfer.transferId, failingTransport);
+
+    expect(failedEvent).toBe(true);
+    expect(transfer.status).toBe('failed');
+    expect(transfer.error).toContain('Transport send failed');
+  });
+
+  it('prevents duplicate chunks from corrupting transfer progress and byte count', async () => {
+    const receiverEngine = new FileTransferEngine('bob');
+    const transferId = 'dup-test-id';
+    const recvTransfer = receiverEngine.handleIncomingOffer({
+      transferId,
+      fileName: 'dup_test.bin',
+      fileSize: 200,
+      chunkSize: 100,
+      totalChunks: 2,
+      senderId: 'alice',
+      sha256Hash: 'dummy',
+    });
+
+    const chunk0: FileChunk = {
+      transferId,
+      chunkIndex: 0,
+      totalChunks: 2,
+      data: Buffer.from(new Uint8Array(100)).toString('base64'),
+    };
+
+    // First time receiving chunk 0
+    await receiverEngine.handleIncomingChunk(chunk0);
+    expect(recvTransfer.transferredChunks).toBe(1);
+    expect(recvTransfer.transferredBytes).toBe(100);
+
+    // Duplicate arrival of chunk 0
+    await receiverEngine.handleIncomingChunk(chunk0);
+    expect(recvTransfer.transferredChunks).toBe(1); // Must remain 1, not incremented to 2!
+    expect(recvTransfer.transferredBytes).toBe(100); // Must remain 100, not double-counted!
+  });
+
+  it('validates chunk indexes and boundary limits', async () => {
+    const receiverEngine = new FileTransferEngine('bob');
+    const transferId = 'bounds-test-id';
+    const recvTransfer = receiverEngine.handleIncomingOffer({
+      transferId,
+      fileName: 'bounds_test.bin',
+      fileSize: 100,
+      chunkSize: 100,
+      totalChunks: 1,
+      senderId: 'alice',
+      sha256Hash: 'dummy',
+    });
+
+    let failedEvent = false;
+    receiverEngine.on('transferFailed', () => {
+      failedEvent = true;
+    });
+
+    // Send chunk with invalid index (99 for totalChunks = 1)
+    await receiverEngine.handleIncomingChunk({
+      transferId,
+      chunkIndex: 99,
+      totalChunks: 1,
+      data: Buffer.from(new Uint8Array(50)).toString('base64'),
+    });
+
+    expect(failedEvent).toBe(true);
+    expect(recvTransfer.status).toBe('failed');
+    expect(recvTransfer.error).toContain('Invalid chunkIndex');
+  });
+
+  it('handles disk-write failures gracefully in streaming chunk sinks', async () => {
+    const receiverEngine = new FileTransferEngine('bob');
+    const transferId = 'disk-fail-id';
+    const recvTransfer = receiverEngine.handleIncomingOffer({
+      transferId,
+      fileName: 'disk_fail.bin',
+      fileSize: 100,
+      chunkSize: 100,
+      totalChunks: 1,
+      senderId: 'alice',
+      sha256Hash: 'dummy',
+    });
+
+    let abortCalled = false;
+    receiverEngine.registerChunkSink(transferId, {
+      writeChunk: () => {
+        throw new Error('ENOSPC: no space left on device');
+      },
+      finalize: async () => {},
+      abort: () => {
+        abortCalled = true;
+      },
+    });
+
+    let failedEvent = false;
+    receiverEngine.on('transferFailed', () => {
+      failedEvent = true;
+    });
+
+    await receiverEngine.handleIncomingChunk({
+      transferId,
+      chunkIndex: 0,
+      totalChunks: 1,
+      data: Buffer.from(new Uint8Array(100)).toString('base64'),
+    });
+
+    expect(failedEvent).toBe(true);
+    expect(abortCalled).toBe(true);
+    expect(recvTransfer.status).toBe('failed');
+    expect(recvTransfer.error).toContain('ENOSPC');
+  });
+
+  it('processes receiver transfer confirmation correctly on sender', async () => {
+    const senderEngine = new FileTransferEngine('alice');
+    const { transfer } = await senderEngine.createTransferOffer(
+      {
+        name: 'confirm_test.bin',
+        size: 50,
+        type: 'text/plain',
+        data: new Uint8Array(50),
+      },
+      'bob'
+    );
+
+    // Simulate negative confirmation from receiver (e.g. disk write failed on remote)
+    senderEngine.handleTransferConfirmation(transfer.transferId, false, 'Disk full on receiver');
+    expect(transfer.status).toBe('failed');
+    expect(transfer.error).toBe('Disk full on receiver');
+  });
+
+  it('detects idle transfer timeouts', () => {
+    const engine = new FileTransferEngine('alice');
+    const transferId = 'timeout-test-id';
+    const transfer = engine.handleIncomingOffer({
+      transferId,
+      fileName: 'idle.bin',
+      fileSize: 1000,
+      totalChunks: 10,
+      senderId: 'bob',
+      sha256Hash: 'dummy',
+    });
+
+    transfer.status = 'transferring';
+    // Backdate start time to simulate 70 seconds of inactivity
+    transfer.startedAt = Date.now() - 70000;
+
+    let failedEvent = false;
+    engine.on('transferFailed', () => {
+      failedEvent = true;
+    });
+
+    engine.checkTimeouts(60000); // 60s timeout
+    expect(failedEvent).toBe(true);
+    expect(transfer.status).toBe('failed');
+    expect(transfer.error).toContain('timed out');
+  });
 });

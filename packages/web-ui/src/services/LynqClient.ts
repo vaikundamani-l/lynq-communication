@@ -77,6 +77,8 @@ export class LynqClient {
             },
           },
         });
+        // Request persistent message history from daemon SQLite storage
+        this.requestHistorySync();
       };
 
       this.ws.onmessage = (event) => {
@@ -112,6 +114,14 @@ export class LynqClient {
               break;
             case 'msg:delete':
               this.emit({ type: 'delete', payload: envelope.payload as any });
+              break;
+            case 'msg:sync_response':
+              const syncMsgs = envelope.payload as Message[];
+              if (Array.isArray(syncMsgs)) {
+                syncMsgs.forEach((msg) => {
+                  this.emit({ type: 'message', payload: msg });
+                });
+              }
               break;
           }
         } catch {
@@ -157,6 +167,17 @@ export class LynqClient {
       return true;
     }
     return false;
+  }
+
+  public requestHistorySync(conversationId?: string, limit = 200): void {
+    this.sendEnvelope({
+      id: generateUUID(),
+      type: 'msg:sync_request',
+      senderId: this.myUid,
+      recipientId: 'server',
+      timestamp: Date.now(),
+      payload: { conversationId, limit },
+    });
   }
 
   public sendMessage(recipientIdOrMsg: string | Message, content?: string, replyToId?: string): Message {

@@ -80,12 +80,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 className="modal-input"
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
-                placeholder="/home/user/Downloads/LYNQ"
+                placeholder="Downloads/LYNQ"
                 style={{ flex: 1 }}
               />
               <button
                 type="button"
-                onClick={() => setPath('/home/shadow-khan/Downloads/LYNQ')}
+                onClick={() => {
+                  const isWin = typeof navigator !== 'undefined' && /win/i.test(navigator.userAgent || (navigator as any).platform || '');
+                  setPath(isWin ? 'C:\\Users\\Public\\Downloads\\LYNQ' : '~/Downloads/LYNQ');
+                }}
                 style={{
                   background: 'var(--bg-active)',
                   border: '1px solid var(--border-subtle)',

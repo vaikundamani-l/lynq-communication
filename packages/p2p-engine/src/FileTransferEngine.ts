@@ -79,7 +79,7 @@ export class FileTransferEngine extends EventEmitter {
   >();
   private incomingBuffers = new Map<
     string,
-    { chunks: Map<number, Uint8Array>; receivedBytes: number }
+    { chunks: Map<number, Uint8Array>; receivedBytes: number; receivedIndexes: Set<number> }
   >();
   private incomingSinks = new Map<string, ChunkSink>();
   private transferSpeeds = new Map<string, { lastBytes: number; lastTime: number }>();
@@ -198,6 +198,7 @@ export class FileTransferEngine extends EventEmitter {
     this.incomingBuffers.set(transfer.transferId, {
       chunks: new Map<number, Uint8Array>(),
       receivedBytes: 0,
+      receivedIndexes: new Set<number>(),
     });
 
     this.emit('offerReceived', transfer);
@@ -297,7 +298,14 @@ export class FileTransferEngine extends EventEmitter {
         data: chunkDataStr,
       };
 
-      transport.sendData('transfer:chunk', chunk);
+      const sent = transport.sendData('transfer:chunk', chunk);
+      if (!sent) {
+        transfer.status = 'failed';
+        transfer.error = `Transport send failed on chunk ${index}/${transfer.totalChunks}`;
+        this.cleanupTransfer(transferId);
+        this.emit('transferFailed', transfer);
+        return;
+      }
 
       transfer.transferredChunks = index + 1;
       transfer.transferredBytes = end;
@@ -316,39 +324,136 @@ export class FileTransferEngine extends EventEmitter {
 
   /**
    * Recipient processes an incoming chunk. Streams to disk or in-memory sink and verifies integrity.
+   * Validates chunk boundaries, detects and drops duplicate chunks, and confirms completion.
    */
-  public async handleIncomingChunk(chunk: FileChunk): Promise<void> {
+  public async handleIncomingChunk(
+    chunk: FileChunk,
+    transport?: TransferTransport
+  ): Promise<void> {
     const transfer = this.activeTransfers.get(chunk.transferId);
     const bufferRecord = this.incomingBuffers.get(chunk.transferId);
     if (!transfer || !bufferRecord) return;
 
+    if (transfer.status !== 'transferring' && transfer.status !== 'pending_approval') {
+      return;
+    }
+
+    // 1. Validate chunkIndex
+    if (chunk.chunkIndex < 0 || chunk.chunkIndex >= transfer.totalChunks) {
+      transfer.status = 'failed';
+      transfer.error = `Invalid chunkIndex ${chunk.chunkIndex} for totalChunks ${transfer.totalChunks}`;
+      transport?.sendData('transfer:complete', {
+        transferId: chunk.transferId,
+        success: false,
+        error: transfer.error,
+      });
+      this.emit('transferFailed', transfer);
+      this.cleanupTransfer(chunk.transferId);
+      return;
+    }
+
+    // 2. Prevent duplicate chunk processing
+    if (bufferRecord.receivedIndexes.has(chunk.chunkIndex)) {
+      transport?.sendData('transfer:chunk_ack', {
+        transferId: chunk.transferId,
+        chunkIndex: chunk.chunkIndex,
+      });
+      return;
+    }
+
     const chunkBytes = base64ToUint8(chunk.data);
     const offset = chunk.chunkIndex * transfer.chunkSize;
 
+    // 3. Validate chunk length and file boundary
+    if (offset + chunkBytes.length > transfer.fileSize) {
+      transfer.status = 'failed';
+      transfer.error = `Chunk bytes exceed total file size boundary (${offset + chunkBytes.length} > ${transfer.fileSize})`;
+      transport?.sendData('transfer:complete', {
+        transferId: chunk.transferId,
+        success: false,
+        error: transfer.error,
+      });
+      this.emit('transferFailed', transfer);
+      this.cleanupTransfer(chunk.transferId);
+      return;
+    }
+
+    // Non-final chunks must not exceed negotiated chunkSize
+    if (chunk.chunkIndex < transfer.totalChunks - 1 && chunkBytes.length > transfer.chunkSize) {
+      transfer.status = 'failed';
+      transfer.error = `Chunk length ${chunkBytes.length} exceeds negotiated chunkSize ${transfer.chunkSize}`;
+      transport?.sendData('transfer:complete', {
+        transferId: chunk.transferId,
+        success: false,
+        error: transfer.error,
+      });
+      this.emit('transferFailed', transfer);
+      this.cleanupTransfer(chunk.transferId);
+      return;
+    }
+
+    // 4. Write chunk to sink or memory buffer
     const sink = this.incomingSinks.get(chunk.transferId);
     if (sink) {
-      // Direct progressive stream to disk or stream sink (0 RAM retained)
-      await sink.writeChunk(chunk.chunkIndex, chunkBytes, offset);
+      try {
+        await sink.writeChunk(chunk.chunkIndex, chunkBytes, offset);
+      } catch (err: any) {
+        transfer.status = 'failed';
+        transfer.error = `Disk write failure on chunk ${chunk.chunkIndex}: ${err?.message || err}`;
+        sink.abort?.();
+        transport?.sendData('transfer:complete', {
+          transferId: chunk.transferId,
+          success: false,
+          error: transfer.error,
+        });
+        this.emit('transferFailed', transfer);
+        this.cleanupTransfer(chunk.transferId);
+        return;
+      }
     } else {
-      // In-memory fallback for small transfers (< 250 MB)
       bufferRecord.chunks.set(chunk.chunkIndex, chunkBytes);
     }
 
+    bufferRecord.receivedIndexes.add(chunk.chunkIndex);
     bufferRecord.receivedBytes += chunkBytes.length;
-    transfer.transferredChunks++;
+    transfer.transferredChunks = bufferRecord.receivedIndexes.size;
     transfer.transferredBytes = bufferRecord.receivedBytes;
     this.updateMetrics(transfer);
 
     this.emit('progress', transfer);
 
-    // If all chunks received, finalize transfer
-    if (transfer.transferredChunks >= transfer.totalChunks) {
+    if (transport) {
+      transport.sendData('transfer:chunk_ack', {
+        transferId: chunk.transferId,
+        chunkIndex: chunk.chunkIndex,
+      });
+    }
+
+    // 5. If all unique chunks received, finalize transfer
+    if (bufferRecord.receivedIndexes.size >= transfer.totalChunks) {
       if (sink) {
-        const finalizeResult = await sink.finalize();
-        transfer.status = 'completed';
-        transfer.completedAt = Date.now();
-        this.emit('transferCompleted', { transfer, result: finalizeResult });
-        this.cleanupTransfer(chunk.transferId);
+        try {
+          const finalizeResult = await sink.finalize();
+          transfer.status = 'completed';
+          transfer.completedAt = Date.now();
+          transport?.sendData('transfer:complete', {
+            transferId: chunk.transferId,
+            success: true,
+          });
+          this.emit('transferCompleted', { transfer, result: finalizeResult });
+          this.cleanupTransfer(chunk.transferId);
+        } catch (err: any) {
+          transfer.status = 'failed';
+          transfer.error = `Sink finalization failure: ${err?.message || err}`;
+          sink.abort?.();
+          transport?.sendData('transfer:complete', {
+            transferId: chunk.transferId,
+            success: false,
+            error: transfer.error,
+          });
+          this.emit('transferFailed', transfer);
+          this.cleanupTransfer(chunk.transferId);
+        }
         return;
       }
 
@@ -367,6 +472,11 @@ export class FileTransferEngine extends EventEmitter {
       if (!isValid) {
         transfer.status = 'failed';
         transfer.error = 'SHA-256 checksum verification failed: file corrupted in transit';
+        transport?.sendData('transfer:complete', {
+          transferId: chunk.transferId,
+          success: false,
+          error: transfer.error,
+        });
         this.emit('transferFailed', transfer);
         this.cleanupTransfer(chunk.transferId);
         return;
@@ -374,8 +484,73 @@ export class FileTransferEngine extends EventEmitter {
 
       transfer.status = 'completed';
       transfer.completedAt = Date.now();
+      transport?.sendData('transfer:complete', {
+        transferId: chunk.transferId,
+        success: true,
+      });
       this.emit('transferCompleted', { transfer, fileData: assembled });
       this.cleanupTransfer(chunk.transferId);
+    }
+  }
+
+  /**
+   * Sender processes completion confirmation from receiver.
+   */
+  public handleTransferConfirmation(
+    transferId: string,
+    success: boolean,
+    error?: string
+  ): void {
+    const transfer = this.activeTransfers.get(transferId);
+    if (!transfer) return;
+
+    if (!success) {
+      transfer.status = 'failed';
+      transfer.error = error || 'Receiver rejected transfer finalization';
+      this.cleanupTransfer(transferId);
+      this.emit('transferFailed', transfer);
+      return;
+    }
+
+    transfer.status = 'completed';
+    transfer.completedAt = Date.now();
+    this.cleanupTransfer(transferId);
+    this.emit('transferCompleted', transfer);
+  }
+
+  /**
+   * Handles peer cancellation notification.
+   */
+  public handleRemoteCancellation(transferId: string, reason?: string): void {
+    const transfer = this.activeTransfers.get(transferId);
+    if (transfer) {
+      transfer.status = 'canceled';
+      transfer.error = reason || 'Transfer canceled by remote peer';
+      const sink = this.incomingSinks.get(transferId);
+      sink?.abort?.();
+      this.cleanupTransfer(transferId);
+      this.emit('transferCanceled', transfer);
+    }
+  }
+
+  /**
+   * Periodic check to fail transfers that have timed out without progress.
+   */
+  public checkTimeouts(maxIdleMs = 60000): void {
+    const now = Date.now();
+    for (const [transferId, transfer] of this.activeTransfers.entries()) {
+      if (transfer.status === 'transferring' || transfer.status === 'pending_approval') {
+        const speedRecord = this.transferSpeeds.get(transferId);
+        const lastActivity = speedRecord?.lastTime || transfer.startedAt;
+        if (now - lastActivity > maxIdleMs) {
+          transfer.status = 'failed';
+          transfer.error = `Transfer timed out after ${Math.round(maxIdleMs / 1000)}s of inactivity`;
+          const sink = this.incomingSinks.get(transferId);
+          sink?.abort?.();
+          this.cleanupTransfer(transferId);
+          this.emit('transferFailed', transfer);
+        }
+      }
     }
   }
 

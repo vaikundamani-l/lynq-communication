@@ -175,6 +175,81 @@ describe('@lynq/network-service tests', () => {
       aliceWs.close();
       bobWs.close();
     });
+
+    it('enforces recipient authorization policy when authorizer rejects communication', async () => {
+      // Create server with restrictive authorizer: alice can only message bob, not charlie
+      const authServer = new SignalingServer({
+        port: 19446,
+        authorizer: (senderId, recipientId) => {
+          if (senderId === 'alice' && recipientId === 'charlie') return false;
+          return true;
+        },
+      });
+      await authServer.start();
+
+      const aliceWs = new WebSocket('ws://127.0.0.1:19446');
+      const charlieWs = new WebSocket('ws://127.0.0.1:19446');
+      await Promise.all([
+        new Promise((r) => aliceWs.on('open', r)),
+        new Promise((r) => charlieWs.on('open', r)),
+      ]);
+
+      // Authenticate
+      aliceWs.send(JSON.stringify({ id: generateUUID(), type: 'ping', senderId: 'alice', recipientId: 'server', timestamp: Date.now(), payload: null }));
+      charlieWs.send(JSON.stringify({ id: generateUUID(), type: 'ping', senderId: 'charlie', recipientId: 'server', timestamp: Date.now(), payload: null }));
+      await new Promise((r) => setTimeout(r, 50));
+
+      let charlieReceived = false;
+      charlieWs.on('message', () => {
+        charlieReceived = true;
+      });
+
+      const aliceErrorPromise = new Promise<any>((resolve) => {
+        aliceWs.on('message', (data) => {
+          const parsed = JSON.parse(data.toString());
+          if (parsed.type === 'error' && parsed.payload?.code === 'UNAUTHORIZED_RECIPIENT') {
+            resolve(parsed);
+          }
+        });
+      });
+
+      aliceWs.send(
+        JSON.stringify({
+          id: generateUUID(),
+          type: 'msg:send',
+          senderId: 'alice',
+          recipientId: 'charlie',
+          timestamp: Date.now(),
+          payload: { text: 'Unauthorized ping' },
+        })
+      );
+
+      const err = await aliceErrorPromise;
+      expect(err.payload.code).toBe('UNAUTHORIZED_RECIPIENT');
+      await new Promise((r) => setTimeout(r, 80));
+      expect(charlieReceived).toBe(false);
+
+      aliceWs.close();
+      charlieWs.close();
+      await authServer.stop();
+    });
+
+    it('validates incoming envelope schema and drops malformed envelopes', async () => {
+      const clientWs = new WebSocket(`ws://127.0.0.1:${testPort}`);
+      await new Promise((r) => clientWs.on('open', r));
+
+      let violationFired = false;
+      server.on('securityViolation', (v) => {
+        if (v.type === 'invalid_envelope') violationFired = true;
+      });
+
+      // Send malformed JSON (missing type and recipientId)
+      clientWs.send(JSON.stringify({ senderId: 'attacker' }));
+      await new Promise((r) => setTimeout(r, 80));
+
+      expect(violationFired).toBe(true);
+      clientWs.close();
+    });
   });
 
   describe('PairingManager', () => {

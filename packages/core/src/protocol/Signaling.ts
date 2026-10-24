@@ -22,6 +22,8 @@ export type SignalingType =
   | 'msg:edit'
   | 'msg:delete'
   | 'msg:react'
+  | 'msg:sync_request'
+  | 'msg:sync_response'
   // File Transfer
   | 'transfer:offer'
   | 'transfer:accept'

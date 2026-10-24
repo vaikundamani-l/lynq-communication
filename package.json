@@ -13,9 +13,9 @@
     "packages/*"
   ],
   "scripts": {
-    "start": "./scripts/start-desktop.sh",
+    "start": "node ./scripts/start-desktop.mjs",
     "stop": "./scripts/stop.sh",
-    "dev": "./scripts/start-desktop.sh",
+    "dev": "node ./scripts/start-desktop.mjs",
     "daemon": "node -e \"import('./packages/network-service/dist/index.js').then(async ({ LynqDaemon }) => { const daemon = new LynqDaemon(); await daemon.start(); console.log('LYNQ Daemon active on ws://localhost:' + daemon.profile.signalingPort); process.on('SIGINT', async () => { await daemon.stop(); process.exit(0); }); });\"",
     "ui": "npm run dev --prefix packages/web-ui",
     "build": "npm run build --workspaces --if-present",

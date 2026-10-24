@@ -53,7 +53,25 @@ export const App: React.FC = () => {
     return 'Ubuntu Laptop';
   });
 
-  const [downloadPath, setDownloadPath] = useState('/home/shadow-khan/Downloads/LYNQ');
+  const getDefaultDownloadPath = () => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const saved = window.localStorage.getItem('lynq_download_path');
+      if (saved) return saved;
+    }
+    const isWindows =
+      typeof navigator !== 'undefined' &&
+      /win/i.test(navigator.userAgent || (navigator as any).platform || '');
+    return isWindows ? 'C:\\Users\\Public\\Downloads\\LYNQ' : '~/Downloads/LYNQ';
+  };
+
+  const [downloadPath, setDownloadPathState] = useState(getDefaultDownloadPath);
+
+  const setDownloadPath = (newPath: string) => {
+    setDownloadPathState(newPath);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem('lynq_download_path', newPath);
+    }
+  };
   const [myToken] = useState(() => generatePairingToken());
   const [isPairingOpen, setIsPairingOpen] = useState(false);
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
@@ -202,24 +220,36 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  // Sync contacts to localStorage
+  // Sync contacts to localStorage safely
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.setItem('lynq_contacts', JSON.stringify(contacts));
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem('lynq_contacts', JSON.stringify(contacts));
+      }
+    } catch (e) {
+      console.warn('Failed to persist contacts to localStorage:', e);
     }
   }, [contacts]);
 
-  // Sync groups to localStorage
+  // Sync groups to localStorage safely
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.setItem('lynq_groups', JSON.stringify(groups));
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem('lynq_groups', JSON.stringify(groups));
+      }
+    } catch (e) {
+      console.warn('Failed to persist groups to localStorage:', e);
     }
   }, [groups]);
 
-  // Sync messages to localStorage
+  // Sync messages to localStorage safely
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.setItem('lynq_messages', JSON.stringify(messages.slice(-500)));
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem('lynq_messages', JSON.stringify(messages.slice(-500)));
+      }
+    } catch (e) {
+      console.warn('Failed to persist messages to localStorage:', e);
     }
   }, [messages]);
 

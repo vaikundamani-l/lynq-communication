@@ -329,6 +329,27 @@ export class LynqDaemon extends EventEmitter {
           }
         }
         this.emit('messageDeleted', delPayload);
+      } else if (envelope.type === 'msg:sync_request') {
+        const payload = (envelope.payload || {}) as { conversationId?: string; limit?: number };
+        let history: Message[] = [];
+        try {
+          if (payload?.conversationId) {
+            history = this.messageRepo.getConversationMessages(payload.conversationId, payload.limit || 100);
+          } else {
+            history = this.messageRepo.getRecentMessages(payload?.limit || 200);
+          }
+        } catch (dbErr) {
+          console.warn('Failed to query messages for sync in SQLite:', dbErr);
+        }
+
+        this.signalingServer.sendToClient(envelope.senderId, {
+          id: generateUUID(),
+          type: 'msg:sync_response',
+          senderId: this.profile.uid,
+          recipientId: envelope.senderId,
+          timestamp: Date.now(),
+          payload: history,
+        });
       }
     } catch (err) {
       console.warn('Error handling incoming envelope in daemon:', err);
