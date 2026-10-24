@@ -186,6 +186,10 @@ export class LynqDaemon extends EventEmitter {
     });
 
     // Signaling server incoming messages
+    this.signalingServer.on('error', (err) => {
+      console.warn('SignalingServer internal error (non-fatal):', err);
+    });
+
     this.signalingServer.on('message', (envelope: SignalingEnvelope) => {
       this.handleIncomingEnvelope(envelope);
     });
@@ -208,74 +212,112 @@ export class LynqDaemon extends EventEmitter {
   }
 
   private handleIncomingEnvelope(envelope: SignalingEnvelope): void {
-    if (envelope.type === 'msg:send') {
-      const message = envelope.payload as Message;
-      if (message && message.id) {
-        // Mark as delivered since we received it locally
-        message.status = 'delivered';
-        this.messageRepo.saveMessage(message);
-
-        // Send delivery ack back to sender
-        this.signalingServer.sendToClient(envelope.senderId, {
-          id: generateUUID(),
-          type: 'msg:ack',
-          senderId: this.profile.uid,
-          recipientId: envelope.senderId,
-          timestamp: Date.now(),
-          payload: {
-            messageId: message.id,
-            status: 'delivered',
-            recipientId: this.profile.uid,
-            timestamp: Date.now(),
-          },
-        });
-
-        this.emit('messageReceived', message);
-      }
-    } else if (envelope.type === 'msg:ack') {
-      const ack = envelope.payload as { messageId: string; status: any };
-      if (ack?.messageId && ack?.status) {
-        this.messageRepo.updateMessageStatus(ack.messageId, ack.status);
-        this.emit('messageAck', ack);
-      }
-    } else if (envelope.type === 'msg:typing') {
-      this.emit('peerTyping', envelope.payload);
-    } else if (envelope.type === 'msg:react') {
-      const reactPayload = envelope.payload as {
-        messageId: string;
-        userId: string;
-        emoji: string;
-        action: 'add' | 'remove';
-      };
-      if (reactPayload?.messageId) {
-        const msg = this.messageRepo.getMessageById(reactPayload.messageId);
-        if (msg) {
-          const reactions = msg.reactions || {};
-          const currentList = reactions[reactPayload.emoji] || [];
-          if (reactPayload.action === 'add' && !currentList.includes(reactPayload.userId)) {
-            reactions[reactPayload.emoji] = [...currentList, reactPayload.userId];
-          } else if (reactPayload.action === 'remove') {
-            reactions[reactPayload.emoji] = currentList.filter((u) => u !== reactPayload.userId);
-            if (reactions[reactPayload.emoji].length === 0) {
-              delete reactions[reactPayload.emoji];
-            }
+    try {
+      if (envelope.type === 'msg:send') {
+        const message = envelope.payload as Message;
+        if (message && message.id) {
+          if (!message.conversationId) {
+            message.conversationId = [message.senderId || envelope.senderId, message.receiverId || envelope.recipientId]
+              .sort()
+              .join('_');
           }
-          this.messageRepo.updateReactions(reactPayload.messageId, reactions);
+          if (!message.conversationType) {
+            message.conversationType = 'direct';
+          }
+          if (!message.timestamp) {
+            message.timestamp = Date.now();
+          }
+          if (!message.type) {
+            message.type = 'text';
+          }
+          message.status = 'delivered';
+
+          try {
+            this.messageRepo.saveMessage(message);
+          } catch (dbErr) {
+            console.warn('Failed to save message to SQLite:', dbErr);
+          }
+
+          // Send delivery ack back to sender
+          this.signalingServer.sendToClient(envelope.senderId, {
+            id: generateUUID(),
+            type: 'msg:ack',
+            senderId: this.profile.uid,
+            recipientId: envelope.senderId,
+            timestamp: Date.now(),
+            payload: {
+              messageId: message.id,
+              status: 'delivered',
+              recipientId: this.profile.uid,
+              timestamp: Date.now(),
+            },
+          });
+
+          this.emit('messageReceived', message);
         }
+      } else if (envelope.type === 'msg:ack') {
+        const ack = envelope.payload as { messageId: string; status: any };
+        if (ack?.messageId && ack?.status) {
+          try {
+            this.messageRepo.updateMessageStatus(ack.messageId, ack.status);
+          } catch (dbErr) {
+            console.warn('Failed to update message status in SQLite:', dbErr);
+          }
+          this.emit('messageAck', ack);
+        }
+      } else if (envelope.type === 'msg:typing') {
+        this.emit('peerTyping', envelope.payload);
+      } else if (envelope.type === 'msg:react') {
+        const reactPayload = envelope.payload as {
+          messageId: string;
+          userId: string;
+          emoji: string;
+          action: 'add' | 'remove';
+        };
+        if (reactPayload?.messageId) {
+          try {
+            const msg = this.messageRepo.getMessageById(reactPayload.messageId);
+            if (msg) {
+              const reactions = msg.reactions || {};
+              const currentList = reactions[reactPayload.emoji] || [];
+              if (reactPayload.action === 'add' && !currentList.includes(reactPayload.userId)) {
+                reactions[reactPayload.emoji] = [...currentList, reactPayload.userId];
+              } else if (reactPayload.action === 'remove') {
+                reactions[reactPayload.emoji] = currentList.filter((u) => u !== reactPayload.userId);
+                if (reactions[reactPayload.emoji].length === 0) {
+                  delete reactions[reactPayload.emoji];
+                }
+              }
+              this.messageRepo.updateReactions(reactPayload.messageId, reactions);
+            }
+          } catch (dbErr) {
+            console.warn('Failed to update reaction in SQLite:', dbErr);
+          }
+        }
+        this.emit('messageReaction', reactPayload);
+      } else if (envelope.type === 'msg:edit') {
+        const editPayload = envelope.payload as { messageId: string; content: string; editedAt: number };
+        if (editPayload?.messageId && editPayload?.content) {
+          try {
+            this.messageRepo.editMessage(editPayload.messageId, editPayload.content, editPayload.editedAt);
+          } catch (dbErr) {
+            console.warn('Failed to edit message in SQLite:', dbErr);
+          }
+        }
+        this.emit('messageEdited', editPayload);
+      } else if (envelope.type === 'msg:delete') {
+        const delPayload = envelope.payload as { messageId: string };
+        if (delPayload?.messageId) {
+          try {
+            this.messageRepo.deleteMessage(delPayload.messageId);
+          } catch (dbErr) {
+            console.warn('Failed to delete message in SQLite:', dbErr);
+          }
+        }
+        this.emit('messageDeleted', delPayload);
       }
-      this.emit('messageReaction', reactPayload);
-    } else if (envelope.type === 'msg:edit') {
-      const editPayload = envelope.payload as { messageId: string; content: string; editedAt: number };
-      if (editPayload?.messageId && editPayload?.content) {
-        this.messageRepo.editMessage(editPayload.messageId, editPayload.content, editPayload.editedAt);
-      }
-      this.emit('messageEdited', editPayload);
-    } else if (envelope.type === 'msg:delete') {
-      const delPayload = envelope.payload as { messageId: string };
-      if (delPayload?.messageId) {
-        this.messageRepo.deleteMessage(delPayload.messageId);
-      }
-      this.emit('messageDeleted', delPayload);
+    } catch (err) {
+      console.warn('Error handling incoming envelope in daemon:', err);
     }
   }
 
