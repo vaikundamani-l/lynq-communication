@@ -297,7 +297,7 @@ export class LynqDaemon extends EventEmitter {
               if (reactPayload.action === 'add' && !currentList.includes(reactPayload.userId)) {
                 reactions[reactPayload.emoji] = [...currentList, reactPayload.userId];
               } else if (reactPayload.action === 'remove') {
-                reactions[reactPayload.emoji] = currentList.filter((u) => u !== reactPayload.userId);
+                reactions[reactPayload.emoji] = currentList.filter((u: string) => u !== reactPayload.userId);
                 if (reactions[reactPayload.emoji].length === 0) {
                   delete reactions[reactPayload.emoji];
                 }

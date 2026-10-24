@@ -97,7 +97,7 @@ export class GroupManager extends EventEmitter {
       throw new Error(`Group not found: ${groupId}`);
     }
 
-    const isMember = group.members.some((m) => m.userId === this.myUid);
+    const isMember = group.members.some((m: GroupMember) => m.userId === this.myUid);
     if (!isMember) {
       throw new Error(`User ${this.myUid} is not a member of group ${groupId}`);
     }
@@ -152,7 +152,7 @@ export class GroupManager extends EventEmitter {
     const group = this.groupRepo.getGroup(groupId);
     if (!group) throw new Error('Group not found');
 
-    const caller = group.members.find((m) => m.userId === callerId);
+    const caller = group.members.find((m: GroupMember) => m.userId === callerId);
     if (!caller || (caller.role !== 'creator' && caller.role !== 'admin')) {
       throw new Error('Permission denied: Only group creator or admins can add members');
     }
@@ -179,12 +179,12 @@ export class GroupManager extends EventEmitter {
       throw new Error('Permission denied: The group creator cannot be removed');
     }
 
-    const caller = group.members.find((m) => m.userId === callerId);
+    const caller = group.members.find((m: GroupMember) => m.userId === callerId);
     if (!caller || (caller.role !== 'creator' && caller.role !== 'admin')) {
       throw new Error('Permission denied: Only group creator or admins can remove members');
     }
 
-    const target = group.members.find((m) => m.userId === targetUserId);
+    const target = group.members.find((m: GroupMember) => m.userId === targetUserId);
     if (caller.role === 'admin' && target?.role === 'admin' && callerId !== targetUserId) {
       throw new Error('Permission denied: Admins cannot remove other admins');
     }
@@ -200,7 +200,7 @@ export class GroupManager extends EventEmitter {
     const group = this.groupRepo.getGroup(groupId);
     if (!group) throw new Error('Group not found');
 
-    const caller = group.members.find((m) => m.userId === callerId);
+    const caller = group.members.find((m: GroupMember) => m.userId === callerId);
     if (!caller || caller.role !== 'creator') {
       throw new Error('Permission denied: Only the group creator can promote admins');
     }
