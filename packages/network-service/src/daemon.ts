@@ -2,6 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { EventEmitter } from 'node:events';
+import { WebSocket } from 'ws';
 import {
   Contact,
   DeviceInfo,
@@ -18,7 +19,7 @@ import {
 } from '@lynq/storage';
 import { UdpDiscovery } from './discovery/UdpDiscovery.js';
 import { MdnsDiscovery } from './discovery/MdnsDiscovery.js';
-import { SignalingServer } from './signaling/SignalingServer.js';
+import { SignalingServer, SignalingAuthContext } from './signaling/SignalingServer.js';
 import { PairingManager } from './pairing/PairingManager.js';
 import { MessageQueueManager } from './queue/MessageQueueManager.js';
 import { GroupManager } from './group/GroupManager.js';
@@ -29,6 +30,7 @@ export interface DaemonConfig {
   signalingPort?: number;
   udpDiscoveryPort?: number;
   username?: string;
+  requireAuth?: boolean;
 }
 
 export interface NodeProfile {
@@ -106,9 +108,14 @@ export class LynqDaemon extends EventEmitter {
     };
 
     // 3. Components
+    const requireAuth = config.requireAuth ?? true;
     this.signalingServer = new SignalingServer({
       port: signalingPort,
       host: '0.0.0.0',
+      requireAuth,
+      authenticator: (auth: SignalingAuthContext, ws: WebSocket) => {
+        return this.authenticateClient(auth, ws);
+      },
       authorizer: (senderId: string, recipientId: string, type: string) => {
         return this.authorizeMessage(senderId, recipientId, type);
       },
@@ -359,6 +366,42 @@ export class LynqDaemon extends EventEmitter {
     }
   }
 
+  public authenticateClient(auth: SignalingAuthContext, ws: WebSocket): boolean {
+    // 1. Connection from loopback / localhost is trusted local client or UI
+    const remoteAddr = (ws as any)?._socket?.remoteAddress;
+    const isLocal =
+      remoteAddr === '127.0.0.1' ||
+      remoteAddr === '::1' ||
+      remoteAddr === '::ffff:127.0.0.1' ||
+      remoteAddr === undefined;
+
+    if (isLocal) {
+      return true;
+    }
+
+    // 2. Local daemon user identity match
+    if (auth.uid === this.profile.uid) {
+      return true;
+    }
+
+    // 3. Active pairing session verification
+    const activeSession = this.pairingManager.getActiveToken();
+    if (activeSession && auth.token && auth.token === activeSession.token) {
+      return true;
+    }
+
+    // 4. Paired contact verification in SQLite repository
+    const contact = this.contactRepo.getContact(auth.uid);
+    if (contact && contact.isPaired) {
+      if (auth.token && contact.pairingToken && auth.token !== contact.pairingToken) {
+        return false;
+      }
+      return true;
+    }
+
+    return false;
+  }
+
   private authorizeMessage(senderId: string, recipientId: string, type: string): boolean {
     // 1. Local daemon user is always authorized to send
     if (senderId === this.profile.uid) {
@@ -367,7 +410,7 @@ export class LynqDaemon extends EventEmitter {
 
     // 2. Incoming messages targeting this daemon
     if (recipientId === this.profile.uid) {
-      // Protocol negotiation, signaling, and delivery acknowledgements are permitted
+      // Protocol negotiation, pairing handshake, signaling, and delivery acknowledgements are permitted
       if (
         type === 'ping' ||
         type === 'msg:ack' ||
@@ -380,13 +423,13 @@ export class LynqDaemon extends EventEmitter {
         return true;
       }
 
-      // Check contact repository
+      // Check contact repository: sender must be a verified paired contact
       const contact = this.contactRepo.getContact(senderId);
-      if (contact) {
+      if (contact && contact.isPaired) {
         return true;
       }
 
-      // Drop unauthorized private message injections from unknown peers
+      // Drop unauthorized private message injections from unpaired or unknown peers
       return false;
     }
 
@@ -395,10 +438,10 @@ export class LynqDaemon extends EventEmitter {
       return type === 'presence:update';
     }
 
-    // 4. Third-party transit: permit only if both peers are recognized contacts
+    // 4. Third-party transit: permit only if both peers are verified paired contacts
     const senderContact = this.contactRepo.getContact(senderId);
     const recipientContact = this.contactRepo.getContact(recipientId);
-    return !!(senderContact && recipientContact);
+    return !!(senderContact?.isPaired && recipientContact?.isPaired);
   }
 
   public async start(): Promise<void> {

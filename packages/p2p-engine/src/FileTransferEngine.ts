@@ -11,6 +11,16 @@ import {
   MAX_SUPPORTED_FILE_SIZE,
 } from '@lynq/core';
 
+// Safe dynamic loader for node:crypto in Node environments that won't trigger Vite browser warnings
+let nodeCrypto: any = null;
+if (typeof process !== 'undefined' && process.versions?.node) {
+  import('node:crypto')
+    .then((mod) => {
+      nodeCrypto = mod;
+    })
+    .catch(() => {});
+}
+
 export const DEFAULT_CHUNK_SIZE = 64 * 1024; // 64 KB default for <= 10MB
 
 export interface FileDataInput {
@@ -27,6 +37,8 @@ export interface ChunkSink {
   writeChunk: (chunkIndex: number, chunkBytes: Uint8Array, offset: number) => Promise<void> | void;
   finalize: () => Promise<void | any>;
   abort?: () => void;
+  verifyHash?: (expectedHash: string) => Promise<boolean>;
+  getHash?: () => Promise<string> | string;
 }
 
 export interface TransferTransport {
@@ -94,6 +106,9 @@ export class FileTransferEngine extends EventEmitter {
   private outgoingAckResolvers = new Map<string, Map<number, (success: boolean) => void>>();
   private confirmationTimeouts = new Map<string, NodeJS.Timeout>();
   private terminalTransfers = new Set<string>();
+  private incomingHashers = new Map<string, any>();
+  private incomingHasherNextChunk = new Map<string, number>();
+  private incomingOutOfOrderChunks = new Map<string, Map<number, Uint8Array>>();
 
   constructor(private myUid: string) {
     super();
@@ -234,6 +249,13 @@ export class FileTransferEngine extends EventEmitter {
     }
 
     transfer.status = 'transferring';
+    if (nodeCrypto && typeof (nodeCrypto as any).createHash === 'function') {
+      try {
+        this.incomingHashers.set(transferId, (nodeCrypto as any).createHash('sha256'));
+        this.incomingHasherNextChunk.set(transferId, 0);
+        this.incomingOutOfOrderChunks.set(transferId, new Map());
+      } catch {}
+    }
     this.emit('transferStarted', transfer);
 
     return transport.sendData('transfer:accept', {
@@ -276,12 +298,19 @@ export class FileTransferEngine extends EventEmitter {
     if (this.terminalTransfers.has(transferId)) return;
 
     transfer.status = 'transferring';
+    if (nodeCrypto && typeof (nodeCrypto as any).createHash === 'function') {
+      try {
+        this.incomingHashers.set(transferId, (nodeCrypto as any).createHash('sha256'));
+        this.incomingHasherNextChunk.set(transferId, 0);
+        this.incomingOutOfOrderChunks.set(transferId, new Map());
+      } catch {}
+    }
     this.emit('transferStarted', transfer);
     this.transferSpeeds.set(transferId, { lastBytes: 0, lastTime: Date.now() });
 
     const maxRetries = options?.maxRetries ?? 3;
     const ackTimeoutMs = options?.ackTimeoutMs ?? 2000;
-    const waitForAcks = options?.waitForAcks ?? false;
+    const waitForAcks = options?.waitForAcks ?? true;
     const confirmationTimeoutMs = options?.confirmationTimeoutMs ?? 30000;
 
     if (!this.outgoingChunkAcks.has(transferId)) {
@@ -332,17 +361,9 @@ export class FileTransferEngine extends EventEmitter {
           }
 
           attempts++;
-          const sent = transport.sendData('transfer:chunk', chunk);
-          if (!sent && attempts > maxRetries) {
-            this.failTransfer(
-              transfer,
-              `Transport send failed on chunk ${index}/${transfer.totalChunks}`
-            );
-            return;
-          }
 
-          // Wait for receiver ACK with timeout
-          acked = await new Promise<boolean>((resolve) => {
+          // Register ACK resolver BEFORE sending so immediate / synchronous ACKs are never missed
+          const ackPromise = new Promise<boolean>((resolve) => {
             const timer = setTimeout(() => {
               this.removeAckResolver(transferId, index);
               resolve(false);
@@ -353,6 +374,23 @@ export class FileTransferEngine extends EventEmitter {
               resolve(success);
             });
           });
+
+          const sent = transport.sendData('transfer:chunk', chunk);
+          if (!sent) {
+            this.removeAckResolver(transferId, index);
+            if (attempts > maxRetries) {
+              this.failTransfer(
+                transfer,
+                `Transport send failed on chunk ${index}/${transfer.totalChunks}`
+              );
+              return;
+            }
+            await new Promise((r) => setTimeout(r, 20));
+            continue;
+          }
+
+          // Wait for receiver ACK with timeout
+          acked = await ackPromise;
         }
 
         if (!acked) {
@@ -568,6 +606,26 @@ export class FileTransferEngine extends EventEmitter {
       bufferRecord.chunks.set(chunk.chunkIndex, chunkBytes);
     }
 
+    // Feed chunk into progressive SHA-256 hasher
+    const hasher = this.incomingHashers.get(transferId);
+    if (hasher) {
+      let nextExpected = this.incomingHasherNextChunk.get(transferId) ?? 0;
+      const outOfOrder = this.incomingOutOfOrderChunks.get(transferId);
+      if (chunk.chunkIndex === nextExpected) {
+        hasher.update(chunkBytes);
+        nextExpected++;
+        while (outOfOrder && outOfOrder.has(nextExpected)) {
+          const nextBytes = outOfOrder.get(nextExpected)!;
+          outOfOrder.delete(nextExpected);
+          hasher.update(nextBytes);
+          nextExpected++;
+        }
+        this.incomingHasherNextChunk.set(transferId, nextExpected);
+      } else if (chunk.chunkIndex > nextExpected && outOfOrder) {
+        outOfOrder.set(chunk.chunkIndex, chunkBytes);
+      }
+    }
+
     bufferRecord.receivedIndexes.add(chunk.chunkIndex);
     bufferRecord.receivedBytes += chunkBytes.length;
     transfer.transferredChunks = bufferRecord.receivedIndexes.size;
@@ -599,6 +657,37 @@ export class FileTransferEngine extends EventEmitter {
 
       if (sink) {
         try {
+          // Verify SHA-256 integrity on disk sink path
+          if (transfer.sha256Hash) {
+            let isValid = true;
+            if (sink.verifyHash) {
+              isValid = await sink.verifyHash(transfer.sha256Hash);
+            } else if (sink.getHash) {
+              const actual = await sink.getHash();
+              isValid = actual.toLowerCase() === transfer.sha256Hash.toLowerCase();
+            } else if (hasher) {
+              try {
+                const actual = hasher.digest('hex');
+                isValid = actual.toLowerCase() === transfer.sha256Hash.toLowerCase();
+              } catch {
+                // If already digested
+              }
+            }
+
+            if (!isValid) {
+              transfer.status = 'failed';
+              transfer.error = 'SHA-256 checksum verification failed on disk sink: file corrupted in transit';
+              sink.abort?.();
+              transport?.sendData('transfer:complete', {
+                transferId,
+                success: false,
+                error: transfer.error,
+              });
+              this.failTransfer(transfer, transfer.error);
+              return;
+            }
+          }
+
           const finalizeResult = await sink.finalize();
           this.terminalTransfers.add(transferId);
           transfer.status = 'completed';
@@ -822,6 +911,9 @@ export class FileTransferEngine extends EventEmitter {
     this.incomingSinks.delete(transferId);
     this.transferSpeeds.delete(transferId);
     this.outgoingChunkAcks.delete(transferId);
+    this.incomingHashers.delete(transferId);
+    this.incomingHasherNextChunk.delete(transferId);
+    this.incomingOutOfOrderChunks.delete(transferId);
     const resolvers = this.outgoingAckResolvers.get(transferId);
     if (resolvers) {
       for (const res of resolvers.values()) {

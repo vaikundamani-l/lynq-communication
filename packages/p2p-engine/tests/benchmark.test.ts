@@ -86,7 +86,14 @@ describe('Performance Benchmarks (Latency, Throughput, and Concurrency)', () => 
     receiver.handleIncomingOffer(offer);
 
     const receiverTransport: TransferTransport = {
-      sendData: () => true,
+      sendData: (type: string, payload: any) => {
+        if (type === 'transfer:chunk_ack') {
+          sender.handleChunkAck(payload.transferId, payload.chunkIndex);
+        } else if (type === 'transfer:complete') {
+          sender.handleTransferConfirmation(payload.transferId, payload.success, payload.error);
+        }
+        return true;
+      },
     };
     receiver.acceptTransfer(offer.transferId, receiverTransport);
 
@@ -99,8 +106,8 @@ describe('Performance Benchmarks (Latency, Throughput, and Concurrency)', () => 
     const senderTransport: TransferTransport = {
       sendData: (type: string, payload: unknown) => {
         if (type === 'transfer:chunk') {
-          // Stream directly into receiver
-          receiver.handleIncomingChunk(payload as FileChunk);
+          // Stream directly into receiver with ACK transport
+          receiver.handleIncomingChunk(payload as FileChunk, receiverTransport);
         }
         return true;
       },
@@ -142,13 +149,20 @@ describe('Performance Benchmarks (Latency, Throughput, and Concurrency)', () => 
     });
 
     const receiverTransport: TransferTransport = {
-      sendData: () => true,
+      sendData: (type: string, payload: any) => {
+        if (type === 'transfer:chunk_ack') {
+          sender.handleChunkAck(payload.transferId, payload.chunkIndex);
+        } else if (type === 'transfer:complete') {
+          sender.handleTransferConfirmation(payload.transferId, payload.success, payload.error);
+        }
+        return true;
+      },
     };
 
     const senderTransport: TransferTransport = {
       sendData: (type: string, payload: unknown) => {
         if (type === 'transfer:chunk') {
-          receiver.handleIncomingChunk(payload as FileChunk);
+          receiver.handleIncomingChunk(payload as FileChunk, receiverTransport);
         }
         return true;
       },

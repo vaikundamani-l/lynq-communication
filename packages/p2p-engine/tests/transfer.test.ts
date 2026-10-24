@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { FileTransferEngine, FileDataInput, TransferTransport } from '../src/index.js';
-import { FileChunk } from '@lynq/core';
+import { FileChunk, computeSHA256 } from '@lynq/core';
 
 describe('FileTransferEngine (P2P Streaming, Chunking & Verification)', () => {
   it('creates transfer offer with sanitized filename and valid SHA-256', async () => {
@@ -49,27 +49,6 @@ describe('FileTransferEngine (P2P Streaming, Chunking & Verification)', () => {
     const recvTransfer = receiverEngine.handleIncomingOffer(sendTransfer);
     expect(recvTransfer.status).toBe('pending_approval');
 
-    // Transport channel wire
-    const transmittedChunks: FileChunk[] = [];
-    const mockTransport: TransferTransport = {
-      sendData: (type: string, payload: unknown) => {
-        if (type === 'transfer:chunk') {
-          transmittedChunks.push(payload as FileChunk);
-        }
-        return true;
-      },
-    };
-
-    // Receiver accepts
-    receiverEngine.acceptTransfer(recvTransfer.transferId, mockTransport);
-
-    // Sender streams outgoing chunks
-    await senderEngine.startStreamingOutgoing(sendTransfer.transferId, mockTransport);
-    expect(transmittedChunks).toHaveLength(3);
-    // Sender must NOT report completed before receiver confirmation
-    expect(sendTransfer.status).toBe('transferring');
-
-    // Receiver processes incoming chunks with two-way signaling confirmation
     let completedEventFired = false;
     let verifiedFileData: Uint8Array | null = null;
 
@@ -91,9 +70,30 @@ describe('FileTransferEngine (P2P Streaming, Chunking & Verification)', () => {
       },
     };
 
-    for (const chunk of transmittedChunks) {
-      await receiverEngine.handleIncomingChunk(chunk, receiverTransport);
-    }
+    // Transport channel wire with live ACK delivery
+    const transmittedChunks: FileChunk[] = [];
+    const mockTransport: TransferTransport = {
+      sendData: (type: string, payload: unknown) => {
+        if (type === 'transfer:chunk') {
+          const chunk = payload as FileChunk;
+          transmittedChunks.push(chunk);
+          queueMicrotask(() => {
+            receiverEngine.handleIncomingChunk(chunk, receiverTransport);
+          });
+        }
+        return true;
+      },
+    };
+
+    // Receiver accepts
+    receiverEngine.acceptTransfer(recvTransfer.transferId, mockTransport);
+
+    // Sender streams outgoing chunks
+    await senderEngine.startStreamingOutgoing(sendTransfer.transferId, mockTransport);
+    expect(transmittedChunks).toHaveLength(3);
+
+    // Wait for receiver processing loop
+    await new Promise((r) => setTimeout(r, 50));
 
     expect(completedEventFired).toBe(true);
     expect(recvTransfer.status).toBe('completed');
@@ -121,10 +121,39 @@ describe('FileTransferEngine (P2P Streaming, Chunking & Verification)', () => {
 
     const recvTransfer = receiverEngine.handleIncomingOffer(sendTransfer);
 
+    let failedEventFired = false;
+    receiverEngine.on('transferFailed', () => {
+      failedEventFired = true;
+    });
+
+    const receiverTransport: TransferTransport = {
+      sendData: (type: string, payload: unknown) => {
+        if (type === 'transfer:chunk_ack') {
+          const { transferId, chunkIndex } = payload as { transferId: string; chunkIndex: number };
+          senderEngine.handleChunkAck(transferId, chunkIndex);
+        } else if (type === 'transfer:complete') {
+          const { transferId, success, error } = payload as { transferId: string; success: boolean; error?: string };
+          senderEngine.handleTransferConfirmation(transferId, success, error);
+        }
+        return true;
+      },
+    };
+
     const transmittedChunks: FileChunk[] = [];
     const mockTransport: TransferTransport = {
       sendData: (type: string, payload: unknown) => {
-        if (type === 'transfer:chunk') transmittedChunks.push(payload as FileChunk);
+        if (type === 'transfer:chunk') {
+          const chunk = payload as FileChunk;
+          // Tamper with chunk 0 in transit!
+          const tampered = {
+            ...chunk,
+            data: Buffer.from('TAMPERED corrupted payload').toString('base64'),
+          };
+          transmittedChunks.push(tampered);
+          queueMicrotask(() => {
+            receiverEngine.handleIncomingChunk(tampered, receiverTransport);
+          });
+        }
         return true;
       },
     };
@@ -132,17 +161,7 @@ describe('FileTransferEngine (P2P Streaming, Chunking & Verification)', () => {
     receiverEngine.acceptTransfer(recvTransfer.transferId, mockTransport);
     await senderEngine.startStreamingOutgoing(sendTransfer.transferId, mockTransport);
 
-    // Tamper with the chunk payload in transit!
-    transmittedChunks[0].data = Buffer.from('TAMPERED corrupted payload').toString('base64');
-
-    let failedEventFired = false;
-    receiverEngine.on('transferFailed', () => {
-      failedEventFired = true;
-    });
-
-    for (const chunk of transmittedChunks) {
-      await receiverEngine.handleIncomingChunk(chunk);
-    }
+    await new Promise((r) => setTimeout(r, 50));
 
     expect(failedEventFired).toBe(true);
     expect(recvTransfer.status).toBe('failed');
@@ -224,6 +243,11 @@ describe('FileTransferEngine (P2P Streaming, Chunking & Verification)', () => {
     // Simulate completion after 3 chunks for testing
     recvTransfer.totalChunks = 3;
     recvTransfer.fileSize = 3 * sampleChunk.length;
+    const threeChunkData = new Uint8Array(3 * sampleChunk.length);
+    threeChunkData.set(sampleChunk, 0);
+    threeChunkData.set(sampleChunk, sampleChunk.length);
+    threeChunkData.set(sampleChunk, 2 * sampleChunk.length);
+    recvTransfer.sha256Hash = await computeSHA256(threeChunkData);
 
     // Stream 3 chunks to verify
     for (let i = 0; i < 3; i++) {
@@ -240,6 +264,52 @@ describe('FileTransferEngine (P2P Streaming, Chunking & Verification)', () => {
     expect(writtenBytes).toBe(3 * sampleChunk.length);
     expect(finalized).toBe(true);
     expect(recvTransfer.status).toBe('completed');
+  });
+
+  it('verifies SHA-256 integrity on disk-sink path and rejects tampered files', async () => {
+    const receiverEngine = new FileTransferEngine('bob');
+    const transferId = 'disk-tamper-id';
+    const sample = new TextEncoder().encode('Legitimate content for disk storage');
+    const expectedHash = await computeSHA256(sample);
+
+    const recvTransfer = receiverEngine.handleIncomingOffer({
+      transferId,
+      fileName: 'disk_verified.iso',
+      fileSize: sample.length,
+      chunkSize: sample.length,
+      totalChunks: 1,
+      senderId: 'alice',
+      sha256Hash: expectedHash,
+    });
+
+    let sinkAborted = false;
+    let finalizeCalled = false;
+    receiverEngine.registerChunkSink(transferId, {
+      writeChunk: () => {},
+      finalize: async () => {
+        finalizeCalled = true;
+      },
+      abort: () => {
+        sinkAborted = true;
+      },
+    });
+
+    receiverEngine.acceptTransfer(transferId, { sendData: () => true });
+
+    // Send tampered chunk bytes of identical length that don't match expectedHash
+    const tamperedBytes = new TextEncoder().encode('Corrupted malicious disk contents!!');
+    expect(tamperedBytes.length).toBe(sample.length);
+    await receiverEngine.handleIncomingChunk({
+      transferId,
+      chunkIndex: 0,
+      totalChunks: 1,
+      data: Buffer.from(tamperedBytes).toString('base64'),
+    });
+
+    expect(sinkAborted).toBe(true);
+    expect(finalizeCalled).toBe(false);
+    expect(recvTransfer.status).toBe('failed');
+    expect(recvTransfer.error).toContain('SHA-256 checksum verification failed on disk sink');
   });
 
   it('rejects files exceeding 20 GB ceiling', async () => {

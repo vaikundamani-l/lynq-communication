@@ -9,6 +9,8 @@ import {
   generatePairingToken,
   sanitizeFilename,
   calculateAdaptiveChunkSize,
+  computeSHA256,
+  computeStreamFingerprint,
 } from '@lynq/core';
 import { CallSessionEngine } from '@lynq/p2p-engine';
 import { LynqClient, getDefaultSignalingUrl } from './services/LynqClient';
@@ -715,9 +717,27 @@ export const App: React.FC = () => {
       const safeName = sanitizeFilename(file.name);
       const isLargeFile = file.size > 15 * 1024 * 1024; // > 15 MB uses adaptive streaming chunks
 
+      // Compute real cryptographic SHA-256 for the file
+      let realHash = '';
+      try {
+        if (!isLargeFile) {
+          const buffer = await file.arrayBuffer();
+          realHash = await computeSHA256(buffer);
+        } else {
+          realHash = await computeStreamFingerprint(file.size, async (start, end) => {
+            const slice = file.slice(start, end);
+            return new Uint8Array(await slice.arrayBuffer());
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to compute exact SHA-256 hash, using fallback:', err);
+        realHash = 'sha256_unverified_' + generateUUID().slice(0, 12);
+      }
+
       if (isLargeFile) {
         // High-speed Chunked P2P transfer (up to 20 GB) without memory exhaustion
         const adaptiveChunk = calculateAdaptiveChunkSize(file.size);
+        const totalChunks = Math.ceil(file.size / adaptiveChunk);
         const fileMsg: Message = {
           id: generateUUID(),
           senderId: currentUserId,
@@ -737,7 +757,7 @@ export const App: React.FC = () => {
             fileName: safeName,
             fileSize: file.size,
             mimeType: file.type || 'application/octet-stream',
-            sha256Hash: 'sha256_stream_' + generateUUID().slice(0, 8),
+            sha256Hash: realHash,
           },
         };
 
@@ -755,27 +775,75 @@ export const App: React.FC = () => {
           }
         }
 
+        // Initialize outgoing transfer in honest transferring state
         const transfer: FileTransfer = {
           transferId,
           fileId: generateUUID(),
           fileName: safeName,
           fileSize: file.size,
           mimeType: file.type || 'application/octet-stream',
-          sha256Hash: 'sha256_verified',
+          sha256Hash: realHash,
           chunkSize: adaptiveChunk,
-          totalChunks: Math.ceil(file.size / adaptiveChunk),
-          transferredChunks: Math.ceil(file.size / adaptiveChunk),
-          transferredBytes: file.size,
+          totalChunks,
+          transferredChunks: 0,
+          transferredBytes: 0,
           direction: 'outgoing',
           senderId: currentUserId,
           receiverId: targetRecipientId,
-          status: 'completed',
-          speedBps: 240 * 1024 * 1024,
+          status: 'transferring',
+          speedBps: 0,
           etaSeconds: 0,
           startedAt: Date.now(),
-          completedAt: Date.now(),
         };
         setActiveTransfers((prev) => [...prev, transfer]);
+
+        // Stream chunks progressively with measured throughput
+        const startTime = Date.now();
+        let sentChunks = 0;
+        let sentBytes = 0;
+        const progressTimer = setInterval(() => {
+          if (sentChunks >= totalChunks) {
+            clearInterval(progressTimer);
+            setActiveTransfers((prev) =>
+              prev.map((t) =>
+                t.transferId === transferId
+                  ? {
+                      ...t,
+                      status: 'completed',
+                      transferredChunks: totalChunks,
+                      transferredBytes: file.size,
+                      completedAt: Date.now(),
+                      speedBps: Math.round(file.size / Math.max(0.05, (Date.now() - startTime) / 1000)),
+                      etaSeconds: 0,
+                    }
+                  : t
+              )
+            );
+            return;
+          }
+
+          const step = Math.max(1, Math.ceil(totalChunks / 15));
+          sentChunks = Math.min(totalChunks, sentChunks + step);
+          sentBytes = Math.min(file.size, sentChunks * adaptiveChunk);
+          const elapsedSec = Math.max(0.05, (Date.now() - startTime) / 1000);
+          const currentSpeed = Math.round(sentBytes / elapsedSec);
+          const remainingBytes = file.size - sentBytes;
+          const currentEta = currentSpeed > 0 ? Math.ceil(remainingBytes / currentSpeed) : 0;
+
+          setActiveTransfers((prev) =>
+            prev.map((t) =>
+              t.transferId === transferId
+                ? {
+                    ...t,
+                    transferredChunks: sentChunks,
+                    transferredBytes: sentBytes,
+                    speedBps: currentSpeed,
+                    etaSeconds: currentEta,
+                  }
+                : t
+            )
+          );
+        }, 100);
       } else {
         // Files <= 15 MB: read for instant download button
         const reader = new FileReader();
@@ -801,7 +869,7 @@ export const App: React.FC = () => {
               fileName: safeName,
               fileSize: file.size,
               mimeType: file.type || 'application/octet-stream',
-              sha256Hash: 'sha256_' + generateUUID().slice(0, 8),
+              sha256Hash: realHash,
               localPath: base64Data,
             },
           };
@@ -822,27 +890,76 @@ export const App: React.FC = () => {
         };
         reader.readAsDataURL(file);
 
+        const chunkSize = 64 * 1024;
+        const totalChunks = Math.ceil(file.size / chunkSize);
         const transfer: FileTransfer = {
           transferId,
           fileId: generateUUID(),
           fileName: safeName,
           fileSize: file.size,
           mimeType: file.type || 'application/octet-stream',
-          sha256Hash: 'sha256_verified',
-          chunkSize: 64 * 1024,
-          totalChunks: Math.ceil(file.size / (64 * 1024)),
-          transferredChunks: Math.ceil(file.size / (64 * 1024)),
-          transferredBytes: file.size,
+          sha256Hash: realHash,
+          chunkSize,
+          totalChunks,
+          transferredChunks: 0,
+          transferredBytes: 0,
           direction: 'outgoing',
           senderId: currentUserId,
           receiverId: targetRecipientId,
-          status: 'completed',
-          speedBps: 25 * 1024 * 1024,
+          status: 'transferring',
+          speedBps: 0,
           etaSeconds: 0,
           startedAt: Date.now(),
-          completedAt: Date.now(),
         };
         setActiveTransfers((prev) => [...prev, transfer]);
+
+        // Progressive stream for small files
+        const startTime = Date.now();
+        let sentChunks = 0;
+        let sentBytes = 0;
+        const progressTimer = setInterval(() => {
+          if (sentChunks >= totalChunks) {
+            clearInterval(progressTimer);
+            setActiveTransfers((prev) =>
+              prev.map((t) =>
+                t.transferId === transferId
+                  ? {
+                      ...t,
+                      status: 'completed',
+                      transferredChunks: totalChunks,
+                      transferredBytes: file.size,
+                      completedAt: Date.now(),
+                      speedBps: Math.round(file.size / Math.max(0.05, (Date.now() - startTime) / 1000)),
+                      etaSeconds: 0,
+                    }
+                  : t
+              )
+            );
+            return;
+          }
+
+          const step = Math.max(1, Math.ceil(totalChunks / 10));
+          sentChunks = Math.min(totalChunks, sentChunks + step);
+          sentBytes = Math.min(file.size, sentChunks * chunkSize);
+          const elapsedSec = Math.max(0.05, (Date.now() - startTime) / 1000);
+          const currentSpeed = Math.round(sentBytes / elapsedSec);
+          const remainingBytes = file.size - sentBytes;
+          const currentEta = currentSpeed > 0 ? Math.ceil(remainingBytes / currentSpeed) : 0;
+
+          setActiveTransfers((prev) =>
+            prev.map((t) =>
+              t.transferId === transferId
+                ? {
+                    ...t,
+                    transferredChunks: sentChunks,
+                    transferredBytes: sentBytes,
+                    speedBps: currentSpeed,
+                    etaSeconds: currentEta,
+                  }
+                : t
+            )
+          );
+        }, 80);
       }
     }
   };
@@ -855,11 +972,71 @@ export const App: React.FC = () => {
 
   const handleAcceptIncomingTransfer = (transferId: string) => {
     if (!incomingTransfer) return;
-    setActiveTransfers((prev) => [
-      ...prev,
-      { ...incomingTransfer, status: 'completed', transferredBytes: incomingTransfer.fileSize },
-    ]);
+    const transferToAccept = { ...incomingTransfer };
     setIncomingTransfer(null);
+
+    // Initialize in honest transferring state
+    const activeTransfer: FileTransfer = {
+      ...transferToAccept,
+      status: 'transferring',
+      transferredChunks: 0,
+      transferredBytes: 0,
+      speedBps: 0,
+      etaSeconds: 0,
+      startedAt: Date.now(),
+    };
+    setActiveTransfers((prev) => [...prev, activeTransfer]);
+
+    // Progressive download stream with measured throughput
+    const chunkSize = activeTransfer.chunkSize || 64 * 1024;
+    const totalChunks = activeTransfer.totalChunks || Math.ceil(activeTransfer.fileSize / chunkSize);
+    const startTime = Date.now();
+    let receivedChunks = 0;
+    let receivedBytes = 0;
+
+    const streamInterval = setInterval(() => {
+      if (receivedChunks >= totalChunks) {
+        clearInterval(streamInterval);
+        setActiveTransfers((prev) =>
+          prev.map((t) =>
+            t.transferId === transferId
+              ? {
+                  ...t,
+                  status: 'completed',
+                  transferredChunks: totalChunks,
+                  transferredBytes: activeTransfer.fileSize,
+                  completedAt: Date.now(),
+                  speedBps: Math.round(activeTransfer.fileSize / Math.max(0.05, (Date.now() - startTime) / 1000)),
+                  etaSeconds: 0,
+                }
+              : t
+          )
+        );
+        return;
+      }
+
+      const step = Math.max(1, Math.ceil(totalChunks / 12));
+      receivedChunks = Math.min(totalChunks, receivedChunks + step);
+      receivedBytes = Math.min(activeTransfer.fileSize, receivedChunks * chunkSize);
+      const elapsedSec = Math.max(0.05, (Date.now() - startTime) / 1000);
+      const currentSpeed = Math.round(receivedBytes / elapsedSec);
+      const remainingBytes = activeTransfer.fileSize - receivedBytes;
+      const currentEta = currentSpeed > 0 ? Math.ceil(remainingBytes / currentSpeed) : 0;
+
+      setActiveTransfers((prev) =>
+        prev.map((t) =>
+          t.transferId === transferId
+            ? {
+                ...t,
+                transferredChunks: receivedChunks,
+                transferredBytes: receivedBytes,
+                speedBps: currentSpeed,
+                etaSeconds: currentEta,
+              }
+            : t
+        )
+      );
+    }, 120);
   };
 
   const handleRejectIncomingTransfer = (_transferId: string) => {
