@@ -68,7 +68,7 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
       </button>
 
       <button
-        className={`rail-btn ${activeTab === 'diagnostics' ? 'active' : ''}`}
+        className={`rail-btn diagnostics-tab-btn desktop-only ${activeTab === 'diagnostics' ? 'active' : ''}`}
         onClick={() => onTabChange('diagnostics')}
         title="LAN Network Diagnostics"
       >
@@ -81,7 +81,7 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
 
       {/* Theme Toggle */}
       <button
-        className="rail-btn theme-toggle-btn"
+        className="rail-btn theme-toggle-btn desktop-only"
         onClick={onToggleTheme}
         title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
       >

@@ -314,11 +314,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
             {!group && <div className={`presence-badge ${contact?.status || 'offline'}`} />}
           </div>
-          <div>
+          <div className="chat-header-info">
             <div className="chat-header-title">{title}</div>
             <div className="chat-header-meta">
               <span className="chat-header-subtitle">{subtitle}</span>
-              {!group && <span className="p2p-shield-badge">🛡️ Direct LAN</span>}
+              {!group && <span className="p2p-shield-badge desktop-only">🛡️ Direct LAN</span>}
             </div>
           </div>
         </div>
@@ -495,8 +495,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         </div>
       )}
 
-      {/* Diagnostics Banner */}
-      <div className="diagnostics-banner">
+      {/* Diagnostics Banner (Desktop only - mobile stays clean and uncluttered) */}
+      <div className="diagnostics-banner desktop-only">
         <span>⚡ Direct Local Connection</span>
         <div className="diagnostics-tags">
           <span

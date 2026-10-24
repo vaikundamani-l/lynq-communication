@@ -175,6 +175,14 @@ export class LynqDaemon extends EventEmitter {
 
   private setupEventWiring(): void {
     // Discovery peer found
+    this.udpDiscovery.on('warning', (err) => {
+      console.warn('UdpDiscovery non-fatal warning:', err?.message || err);
+    });
+
+    this.udpDiscovery.on('error', (err) => {
+      console.warn('UdpDiscovery error handled:', err?.message || err);
+    });
+
     this.udpDiscovery.on('peerFound', (contact: Contact) => {
       this.contactRepo.upsertContact(contact);
       this.emit('contactDiscovered', contact);

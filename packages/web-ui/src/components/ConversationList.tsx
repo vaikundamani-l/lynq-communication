@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Contact, Message, Group } from '@lynq/core';
 
 interface ConversationListProps {
+  activeTab?: 'chats' | 'contacts' | 'pairing' | 'diagnostics' | 'settings';
   contacts: Contact[];
   groups?: Group[];
   messages: Message[];
@@ -43,6 +44,7 @@ const getPlatformIcon = (platform?: string): string => {
 };
 
 export const ConversationList: React.FC<ConversationListProps> = ({
+  activeTab = 'chats',
   contacts,
   groups = [],
   messages,
@@ -91,33 +93,38 @@ export const ConversationList: React.FC<ConversationListProps> = ({
     ).length;
   };
 
+  const isContactsTab = activeTab === 'contacts';
+  const onlineContacts = filteredContacts.filter((c) => c.status === 'online');
+
   return (
     <section className="nav-panel">
       {/* Top Header */}
       <div className="nav-header">
         <div className="nav-header-left">
-          <h2 className="nav-title">Conversations</h2>
+          <h2 className="nav-title">{isContactsTab ? 'Discovered Peers' : 'Conversations'}</h2>
           <div className="lan-pulse-badge" title="Live LAN mesh networking is active">
             <span className="lan-pulse-dot" />
-            <span className="lan-pulse-text">LAN DIRECT</span>
+            <span className="lan-pulse-text">{onlineContacts.length} ONLINE</span>
           </div>
         </div>
 
         <div className="nav-actions">
-          <button
-            onClick={onOpenCreateGroup}
-            className="action-pill-btn"
-            title="Create Private Group"
-          >
-            <span>👥+</span>
-            <span className="pill-btn-label">Group</span>
-          </button>
+          {!isContactsTab && (
+            <button
+              onClick={onOpenCreateGroup}
+              className="action-pill-btn"
+              title="Create Private Group"
+            >
+              <span>👥+</span>
+              <span className="pill-btn-label">Group</span>
+            </button>
+          )}
           <button
             onClick={onOpenPairing}
             className="action-pill-btn accent"
             title="Scan QR / Pair Device"
           >
-            <span>➕</span>
+            <span>🔗</span>
             <span className="pill-btn-label">Pair</span>
           </button>
         </div>
@@ -148,8 +155,8 @@ export const ConversationList: React.FC<ConversationListProps> = ({
       </div>
 
       <div className="items-list">
-        {/* Groups Section */}
-        {filteredGroups.length > 0 && (
+        {/* Groups Section (shown only in Chats tab) */}
+        {!isContactsTab && filteredGroups.length > 0 && (
           <div className="section-group">
             <div className="section-header">
               <span>Groups</span>
@@ -197,7 +204,7 @@ export const ConversationList: React.FC<ConversationListProps> = ({
 
         {/* LAN Peers & Direct Contacts */}
         <div className="section-header">
-          <span>LAN Peers & Contacts</span>
+          <span>{isContactsTab ? 'Active LAN Peers & Nearby Devices' : 'Direct Messages'}</span>
           <span className="section-count">{filteredContacts.length}</span>
         </div>
 

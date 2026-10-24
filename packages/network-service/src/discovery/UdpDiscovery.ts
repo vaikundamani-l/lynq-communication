@@ -55,7 +55,7 @@ export class UdpDiscovery extends EventEmitter {
       this.socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
       this.socket.on('error', (err) => {
-        this.emit('error', err);
+        this.emit('warning', err);
       });
 
       this.socket.on('message', (msg, rinfo) => {
@@ -121,7 +121,8 @@ export class UdpDiscovery extends EventEmitter {
 
     this.socket.send(message, 0, message.length, this.broadcastPort, '255.255.255.255', (err) => {
       if (err) {
-        this.emit('error', err);
+        // Non-fatal broadcast warning (e.g. ENETUNREACH or momentary network interface change)
+        this.emit('warning', err);
       }
     });
   }

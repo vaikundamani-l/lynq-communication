@@ -79,7 +79,7 @@ export const FileTransferModal: React.FC<FileTransferModalProps> = ({
           </button>
           <button
             onClick={() => onAccept(incomingTransfer.transferId)}
-            className="send-btn"
+            className="modal-btn primary"
             style={{
               width: '140px',
               borderRadius: '8px',

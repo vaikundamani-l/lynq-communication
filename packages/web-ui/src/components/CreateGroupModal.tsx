@@ -57,7 +57,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
             </label>
             <input
               type="text"
-              className="composer-input"
+              className="modal-input"
               placeholder="e.g. Engineering Squad"
               value={groupName}
               onChange={(e) => setGroupName(e.target.value)}
@@ -72,7 +72,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
             </label>
             <input
               type="text"
-              className="composer-input"
+              className="modal-input"
               placeholder="e.g. Local network project updates"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -137,7 +137,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
             </button>
             <button
               type="submit"
-              className="send-btn"
+              className="modal-btn primary"
               style={{ width: 'auto', padding: '0 20px', borderRadius: '8px', fontWeight: 600, fontSize: '14px' }}
               disabled={!groupName.trim()}
             >

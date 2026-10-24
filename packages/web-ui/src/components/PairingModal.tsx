@@ -133,8 +133,8 @@ export const PairingModal: React.FC<PairingModalProps> = ({
             />
             <button
               type="submit"
-              className="send-btn"
-              style={{ borderRadius: '12px', width: 'auto', padding: '0 20px', fontSize: '13.5px', fontWeight: 700 }}
+              className="modal-btn primary"
+              style={{ borderRadius: '12px', minWidth: '120px', padding: '0 18px', fontSize: '13.5px', fontWeight: 700 }}
               disabled={inputToken.trim().length < 4}
             >
               Verify & Pair

@@ -9,6 +9,7 @@ interface SettingsModalProps {
   onToggleTheme: () => void;
   downloadPath: string;
   onUpdateDownloadPath: (path: string) => void;
+  onOpenDiagnostics?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -20,6 +21,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleTheme,
   downloadPath,
   onUpdateDownloadPath,
+  onOpenDiagnostics,
 }) => {
   const [name, setName] = useState(username);
   const [path, setPath] = useState(downloadPath);
@@ -155,6 +157,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               />
             </div>
           </div>
+
+          {/* Network Diagnostics */}
+          {onOpenDiagnostics && (
+            <div className="settings-section">
+              <h4 style={{ fontSize: '13px', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                📊 Diagnostics & Topology
+              </h4>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 600 }}>LAN Connection Diagnostics</div>
+                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>Inspect signaling, WebRTC states & active mesh peers</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={onOpenDiagnostics}
+                  style={{
+                    background: 'var(--bg-active)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '8px',
+                    padding: '6px 14px',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    color: 'var(--accent)',
+                  }}
+                >
+                  View Details
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Local-First Data Disclosure (Section 8) */}
           <div

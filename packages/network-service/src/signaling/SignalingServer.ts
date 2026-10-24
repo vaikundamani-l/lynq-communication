@@ -20,7 +20,7 @@ export class SignalingServer extends EventEmitter {
 
   constructor(private options: SignalingServerOptions) {
     super();
-    this.maxPayloadBytes = options.maxPayloadBytes || 25 * 1024 * 1024; // 25 MB LAN bound
+    this.maxPayloadBytes = options.maxPayloadBytes || 64 * 1024 * 1024; // 64 MB LAN bound for high-throughput 20GB streaming
     this.rateLimitPerSec = options.rateLimitPerSec || 200;
   }
 
